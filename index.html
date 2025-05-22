@@ -1,18 +1,17 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>自転車バリアフリーマップ測定</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bike Barrier Detector</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="container">
-    <p id="statusText">測定は停止中です</p>
-    <button id="startStopBtn">測定開始</button>
-    <p id="accelerationText">加速度の変化: 0</p>
+    <p id="statusText">測定していません</p>
+    <button id="toggleButton">測定開始</button>
+    <p>加速度変化: <span id="accelerationValue">0.0</span></p>
   </div>
-
   <script src="script.js"></script>
 </body>
 </html>

@@ -1,69 +1,71 @@
-let watchId = null;
-let lastAcceleration = null;
-let lastGeo = null;
+let isMeasuring = false;
+let prevAcceleration = null;
+let accelerationThreshold = 0.5; // ノイズ除去のための閾値（0.1〜1.0で調整）
+let accelerationDisplay = document.getElementById('accelerationValue');
+let statusText = document.getElementById('statusText');
+let toggleButton = document.getElementById('toggleButton');
 
-// ノイズ除去のしきい値（これを調整すれば感度を変えられる）
-const NOISE_THRESHOLD = 0.3;
+let geoPoints = [];
 
-function startMeasurement() {
-  document.getElementById('status').textContent = '測定中です';
-  document.getElementById('measureButton').disabled = true;
-
-  // 位置情報の取得開始
-  if (navigator.geolocation) {
-    watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        lastGeo = {
-          lat: position.coords.latitude,
-          lon: position.coords.longitude,
-          speed: position.coords.speed
-        };
-      },
-      (error) => {
-        console.error('位置情報の取得に失敗:', error);
-      },
-      { enableHighAccuracy: true, maximumAge: 1000 }
-    );
-  } else {
-    alert('このブラウザでは位置情報が利用できません');
-  }
-
-  // 加速度センサーの設定
-  if (window.DeviceMotionEvent) {
-    window.addEventListener('devicemotion', handleMotion);
-  } else {
-    alert('このデバイスでは加速度センサーが利用できません');
-  }
+function updateAccelerationDisplay(value) {
+  accelerationDisplay.textContent = value.toFixed(1); // 表示は0.0単位に
 }
 
 function handleMotion(event) {
-  const acc = event.accelerationIncludingGravity;
-  if (!acc) return;
+  if (!isMeasuring) return;
 
-  const current = {
-    x: acc.x || 0,
-    y: acc.y || 0,
-    z: acc.z || 0
-  };
+  const acc = event.acceleration;
+  if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
 
-  // 前回との差分を計算
-  if (lastAcceleration) {
-    const dx = current.x - lastAcceleration.x;
-    const dy = current.y - lastAcceleration.y;
-    const dz = current.z - lastAcceleration.z;
+  const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
+  updateAccelerationDisplay(total);
 
-    const totalDiff = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
-
-    // 値を画面に表示（小数第1位）
-    document.getElementById('accValue').textContent = totalDiff.toFixed(1);
-
-    if (totalDiff > NOISE_THRESHOLD) {
-      console.log('大きな変化を検出:', totalDiff.toFixed(2));
-      if (lastGeo) {
-        console.log(`位置: 緯度 ${lastGeo.lat}, 経度 ${lastGeo.lon}`);
-      }
+  if (prevAcceleration !== null) {
+    const diff = Math.abs(total - prevAcceleration);
+    if (diff > accelerationThreshold) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        geoPoints.push({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          timestamp: new Date(),
+          accelerationChange: diff.toFixed(1),
+        });
+        console.log("特徴的な動き記録:", geoPoints[geoPoints.length - 1]);
+      });
     }
   }
 
-  lastAcceleration = current;
+  prevAcceleration = total;
 }
+
+function requestPermissionIfNeeded() {
+  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+    DeviceMotionEvent.requestPermission()
+      .then(permissionState => {
+        if (permissionState === 'granted') {
+          window.addEventListener('devicemotion', handleMotion);
+        } else {
+          alert("加速度センサーの使用が許可されませんでした。");
+        }
+      })
+      .catch(console.error);
+  } else {
+    window.addEventListener('devicemotion', handleMotion); // AndroidやPCなど通常環境
+  }
+}
+
+function toggleMeasurement() {
+  isMeasuring = !isMeasuring;
+
+  if (isMeasuring) {
+    statusText.textContent = "測定中です…";
+    toggleButton.textContent = "測定終了";
+    prevAcceleration = null;
+    requestPermissionIfNeeded();
+  } else {
+    statusText.textContent = "測定していません";
+    toggleButton.textContent = "測定開始";
+  }
+}
+
+toggleButton.addEventListener('click', toggleMeasurement);
