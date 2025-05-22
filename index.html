@@ -2,20 +2,16 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Bike Barrier Detector</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="container">
-    <h1 id="status">測定していません</h1>
-
+    <p id="statusText">測定は停止中です</p>
     <button id="toggleButton">測定開始</button>
-
-    <!-- ここに加速度変化表示 -->
-    <div id="accelerationDisplay">加速度変化: 0.00</div>
+    <p id="accelLog">加速度の変化: -</p>
   </div>
-
   <script src="script.js"></script>
 </body>
 </html>
