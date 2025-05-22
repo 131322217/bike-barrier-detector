@@ -1,58 +1,44 @@
-body {
+body, html {
+  height: 100%;
   margin: 0;
-  padding: 0;
-  font-family: sans-serif;
-  background-color: #f0f0f0;
+  font-family: Arial, sans-serif;
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
+  background: #f0f0f0;
 }
 
 .container {
   text-align: center;
-  padding: 20px;
-  background-color: white;
-  border-radius: 12px;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
   width: 90%;
   max-width: 400px;
 }
 
-#statusText {
-  font-size: 18px;
-  margin-bottom: 20px;
-}
-
-#toggleButton {
-  padding: 14px 32px;
-  font-size: 20px;
-  background-color: #007bff;
-  color: white;
-  border: none;
-  border-radius: 8px;
+#startStopBtn {
+  font-size: 1.5rem;
+  padding: 12px 20px;
+  margin-top: 12px;
+  width: 100%;
   cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  background-color: #2e86de;
+  color: white;
+  transition: background-color 0.3s ease;
 }
 
-#toggleButton:hover {
-  background-color: #0056b3;
+#startStopBtn:hover {
+  background-color: #1b4f72;
 }
 
-#accelLog {
-  margin-top: 20px;
-  font-size: 16px;
+#statusText {
+  font-size: 1.2rem;
+  margin-bottom: 8px;
   color: #333;
 }
 
-/* スマホ対応 */
-@media (max-width: 600px) {
-  #toggleButton {
-    font-size: 18px;
-    padding: 12px 28px;
-  }
-
-  #statusText,
-  #accelLog {
-    font-size: 16px;
-  }
+#accelerationText {
+  margin-top: 12px;
+  font-size: 1rem;
+  color: #555;
 }

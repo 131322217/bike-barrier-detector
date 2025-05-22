@@ -1,93 +1,140 @@
-// ここで設定値を変えられる
-const ACCELERATION_THRESHOLD = 2.0; // 特徴的な動きと判断する閾値（例: 2.0）
-const ACCELERATION_CHECK_INTERVAL = 100; // 加速度チェック間隔(ms)
+// ======== 変数 ========
+// 加速度変化を判定する閾値（自由に調整してください）
+const ACCELERATION_THRESHOLD = 2.0;
 
+// 加速度センサーの直前値保存用
+let lastAccel = { x: null, y: null, z: null };
+
+// 測定状態フラグ
 let isMeasuring = false;
-let prevAccel = { x: 0, y: 0, z: 0 };
-let watchId = null;
-let accelerationDisplay = null;
 
-window.addEventListener('DOMContentLoaded', () => {
-  const toggleButton = document.getElementById('toggleButton');
-  const status = document.getElementById('status');
-  accelerationDisplay = document.getElementById('accelerationDisplay');
+// 測定中の位置情報記録配列
+let recordedPositions = [];
 
-  toggleButton.addEventListener('click', () => {
-    if (!isMeasuring) {
-      startMeasurement();
-      status.textContent = 'ただいま測定中です';
-      toggleButton.textContent = '測定終了';
-    } else {
-      stopMeasurement();
-      status.textContent = '測定していません';
-      toggleButton.textContent = '測定開始';
-      accelerationDisplay.textContent = '加速度変化: 0.00';
+// ボタンと表示要素
+const btn = document.getElementById("startStopBtn");
+const statusText = document.getElementById("statusText");
+const accelerationText = document.getElementById("accelerationText");
+
+// 加速度イベントリスナー用関数
+function handleMotion(event) {
+  if (!isMeasuring) return;
+
+  const acc = event.accelerationIncludingGravity;
+  if (!acc) return;
+
+  // 直前との差を計算
+  let diffX = lastAccel.x !== null ? Math.abs(acc.x - lastAccel.x) : 0;
+  let diffY = lastAccel.y !== null ? Math.abs(acc.y - lastAccel.y) : 0;
+  let diffZ = lastAccel.z !== null ? Math.abs(acc.z - lastAccel.z) : 0;
+
+  // 合計の差分
+  const totalDiff = diffX + diffY + diffZ;
+
+  // 表示更新
+  accelerationText.textContent = `加速度の変化: ${totalDiff.toFixed(2)}`;
+
+  // 閾値を超えたら現在位置を取得し記録
+  if (totalDiff > ACCELERATION_THRESHOLD) {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            timestamp: pos.timestamp,
+            accelerationDiff: totalDiff,
+          };
+          recordedPositions.push(coords);
+          console.log("特徴的な動き検出: ", coords);
+        },
+        (err) => {
+          console.warn("位置情報取得失敗:", err.message);
+        }
+      );
     }
-    isMeasuring = !isMeasuring;
-  });
-});
-
-function startMeasurement() {
-  if (!('geolocation' in navigator) || !('DeviceMotionEvent' in window)) {
-    alert('このブラウザは位置情報または加速度センサーに対応していません。');
-    return;
   }
 
-  // 加速度センサーイベントの処理
-  window.addEventListener('devicemotion', onDeviceMotion);
-
-  // 位置情報の監視開始
-  watchId = navigator.geolocation.watchPosition(
-    position => {
-      // 必要に応じて位置情報の処理をここに追加
-    },
-    error => {
-      console.error(error);
-    },
-    {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 5000
-    }
-  );
+  // 今回の値を保存
+  lastAccel = { x: acc.x, y: acc.y, z: acc.z };
 }
 
-function stopMeasurement() {
-  window.removeEventListener('devicemotion', onDeviceMotion);
+// 加速度使用許可を求める（iOS Safari対応）
+async function requestMotionPermission() {
+  if (
+    typeof DeviceMotionEvent !== "undefined" &&
+    typeof DeviceMotionEvent.requestPermission === "function"
+  ) {
+    try {
+      const response = await DeviceMotionEvent.requestPermission();
+      if (response === "granted") {
+        window.addEventListener("devicemotion", handleMotion);
+        return true;
+      } else {
+        alert("加速度センサーの使用が許可されませんでした");
+        return false;
+      }
+    } catch (error) {
+      console.error("Permission error:", error);
+      return false;
+    }
+  } else {
+    // iOS以外や古いブラウザはそのままイベント登録
+    window.addEventListener("devicemotion", handleMotion);
+    return true;
+  }
+}
 
+// 測定開始
+async function startMeasurement() {
+  const granted = await requestMotionPermission();
+  if (!granted) return;
+
+  // 位置情報の連続監視開始
+  if (navigator.geolocation) {
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        // 位置情報は連続的に記録可能（必要に応じて使う）
+        console.log("現在位置:", pos.coords.latitude, pos.coords.longitude);
+      },
+      (err) => {
+        console.warn("位置情報取得失敗:", err.message);
+      },
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+    );
+  }
+
+  isMeasuring = true;
+  statusText.textContent = "ただいま測定中です";
+  btn.textContent = "測定終了";
+  lastAccel = { x: null, y: null, z: null };
+  recordedPositions = [];
+}
+
+// 測定終了
+function stopMeasurement() {
+  isMeasuring = false;
+  statusText.textContent = "測定は停止中です";
+  btn.textContent = "測定開始";
+
+  // 位置情報の監視停止
   if (watchId !== null) {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
   }
+
+  // ここで recordedPositions のデータを保存や送信したい場合処理を追加
+  console.log("測定終了。特徴的な動きの位置:", recordedPositions);
 }
 
-function onDeviceMotion(event) {
-  const acc = event.accelerationIncludingGravity;
-  if (!acc) return;
-
-  // 直前の加速度との差を計算
-  const deltaX = Math.abs(acc.x - prevAccel.x);
-  const deltaY = Math.abs(acc.y - prevAccel.y);
-  const deltaZ = Math.abs(acc.z - prevAccel.z);
-
-  const totalDelta = deltaX + deltaY + deltaZ;
-
-  // 加速度変化値を画面に表示
-  accelerationDisplay.textContent = `加速度変化: ${totalDelta.toFixed(2)}`;
-
-  if (totalDelta > ACCELERATION_THRESHOLD) {
-    // 特徴的な動きがあったときの処理（位置情報取得など）
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        console.log('特徴的な動き検出:', pos.coords.latitude, pos.coords.longitude);
-        // ここに座標保存などの処理を入れる
-      },
-      err => {
-        console.error('位置情報取得エラー:', err);
-      },
-      { enableHighAccuracy: true }
-    );
+// ボタン押下時の動作切替
+btn.addEventListener("click", () => {
+  if (!isMeasuring) {
+    startMeasurement();
+  } else {
+    stopMeasurement();
   }
+});
 
-  prevAccel = { x: acc.x, y: acc.y, z: acc.z };
-}
+// 位置情報監視IDの保持用
+let watchId = null;
