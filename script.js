@@ -1,8 +1,7 @@
 let isMeasuring = false;
 let previousAcceleration = { x: 0, y: 0, z: 0 };
-let lastAccelChange = 0;
-let accelerationThreshold = 1.5; // 特徴的な動きの判定用
-let displayThreshold = 0.3; // 表示に使うしきい値（0.3以下は表示しない）
+let accelerationThreshold = 1.5;  // 特徴的な動き判定用の閾値
+let displayThreshold = 0.1;       // 表示更新用の閾値（小さめに設定）
 
 let watchId = null;
 let accelListener = null;
@@ -13,7 +12,8 @@ const accelDisplay = document.getElementById('accelValue');
 
 toggleButton.addEventListener('click', async () => {
   if (!isMeasuring) {
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    // iOS Safari用の許可取得処理
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
       try {
         const response = await DeviceMotionEvent.requestPermission();
         if (response !== 'granted') {
@@ -60,7 +60,7 @@ function startMeasuring() {
     const dz = acc.z - previousAcceleration.z;
     const change = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-    // 表示は変化が0.3を超えたときだけ更新
+    // 表示は変化がdisplayThreshold（0.1）を超えたときだけ更新
     if (change > displayThreshold) {
       accelDisplay.textContent = `加速度の変化: ${change.toFixed(1)}`;
     }
