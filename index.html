@@ -35,7 +35,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
     import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-    // Firebase 設定
+    // Firebase設定
     const firebaseConfig = {
       apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
       authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
@@ -48,38 +48,28 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // 加速度変化から強度分類
-    function classifyStrength(diff) {
-      if (diff >= 3.0) return "strong";
-      if (diff >= 1.5) return "medium";
-      return "weak";
-    }
-
-    // Firestore に保存
     async function saveGeoPoint(lat, lng, diff) {
-      const strengthLevel = classifyStrength(diff);
       try {
         await addDoc(collection(db, "barriers"), {
           lat,
           lng,
           accelerationChange: diff,
-          strengthLevel,
           timestamp: new Date()
         });
-        console.log("保存成功:", lat, lng, diff, strengthLevel);
+        console.log("Firestoreに保存成功");
       } catch (e) {
-        console.error("保存失敗", e);
+        console.error("Firestore保存失敗", e);
       }
     }
 
-    // DOM 取得
     const accelerationDisplay = document.getElementById('accelerationValue');
     const statusText = document.getElementById('statusText');
     const toggleButton = document.getElementById('toggleButton');
 
     let isMeasuring = false;
     let prevAcceleration = null;
-    const accelerationThreshold = 0.5;
+    let lastSavedTime = 0;
+    const accelerationThreshold = 1.0; // 少し高めに設定（マンホールを除くイメージ）
 
     function updateAccelerationDisplay(value) {
       accelerationDisplay.textContent = value.toFixed(1);
@@ -94,11 +84,17 @@
       const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
       updateAccelerationDisplay(total);
 
+      const now = Date.now();
       if (prevAcceleration !== null) {
         const diff = Math.abs(total - prevAcceleration);
-        if (diff > accelerationThreshold) {
+        if (diff > accelerationThreshold && (now - lastSavedTime) > 3000) {
           navigator.geolocation.getCurrentPosition(async (position) => {
-            await saveGeoPoint(position.coords.latitude, position.coords.longitude, parseFloat(diff.toFixed(1)));
+            await saveGeoPoint(
+              position.coords.latitude,
+              position.coords.longitude,
+              parseFloat(diff.toFixed(1))
+            );
+            lastSavedTime = Date.now();
           }, (error) => {
             console.error("位置情報取得失敗:", error);
           }, { enableHighAccuracy: true });
@@ -109,7 +105,10 @@
     }
 
     function requestPermissionIfNeeded() {
-      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      if (
+        typeof DeviceMotionEvent !== 'undefined' &&
+        typeof DeviceMotionEvent.requestPermission === 'function'
+      ) {
         DeviceMotionEvent.requestPermission()
           .then(permissionState => {
             if (permissionState === 'granted') {
