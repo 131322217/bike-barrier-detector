@@ -1,17 +1,142 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bike Barrier Detector</title>
-  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 10px;
+    }
+    #accelerationValue {
+      font-size: 1.2em;
+      margin-top: 10px;
+    }
+    #statusText {
+      margin-top: 10px;
+    }
+    #toggleButton {
+      margin-top: 10px;
+      font-size: 1em;
+      padding: 8px 16px;
+    }
+  </style>
 </head>
 <body>
-  <div class="container">
-    <p id="statusText">測定していません</p>
-    <button id="toggleButton">測定開始</button>
-    <p>加速度変化: <span id="accelerationValue">0.0</span></p>
-  </div>
-  <script src="script.js"></script>
+
+  <h1>加速度測定＆Firestore保存</h1>
+
+  <button id="toggleButton">測定開始</button>
+  <div id="statusText">測定していません</div>
+  <div>加速度合計値: <span id="accelerationValue">0.0</span></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+    import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+    // Firebase設定
+    const firebaseConfig = {
+      apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+      authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
+      projectId: "bike-barrier-detector-1e128",
+      storageBucket: "bike-barrier-detector-1e128.firebasestorage.app",
+      messagingSenderId: "556503472203",
+      appId: "1:556503472203:web:d248c2bd6f5773ea9dd5ce"
+    };
+
+    // Firebase初期化
+    const app = initializeApp(firebaseConfig);
+
+    // Firestore初期化
+    const db = getFirestore(app);
+
+    // Firestoreに保存する関数
+    async function saveGeoPoint(lat, lng, diff) {
+      try {
+        await addDoc(collection(db, "barriers"), {
+          lat,
+          lng,
+          accelerationChange: diff,
+          timestamp: new Date()
+        });
+        console.log("Firestoreに保存成功");
+      } catch (e) {
+        console.error("Firestore保存失敗", e);
+      }
+    }
+
+    // DOM取得
+    const accelerationDisplay = document.getElementById('accelerationValue');
+    const statusText = document.getElementById('statusText');
+    const toggleButton = document.getElementById('toggleButton');
+
+    let isMeasuring = false;
+    let prevAcceleration = null;
+    const accelerationThreshold = 0.5;
+
+    function updateAccelerationDisplay(value) {
+      accelerationDisplay.textContent = value.toFixed(1);
+    }
+
+    function handleMotion(event) {
+      if (!isMeasuring) return;
+
+      const acc = event.acceleration;
+      if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
+
+      const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
+      updateAccelerationDisplay(total);
+
+      if (prevAcceleration !== null) {
+        const diff = Math.abs(total - prevAcceleration);
+        if (diff > accelerationThreshold) {
+          navigator.geolocation.getCurrentPosition(async (position) => {
+            await saveGeoPoint(position.coords.latitude, position.coords.longitude, diff.toFixed(1));
+          }, (error) => {
+            console.error("位置情報取得失敗:", error);
+          }, { enableHighAccuracy: true });
+        }
+      }
+      prevAcceleration = total;
+    }
+
+    function requestPermissionIfNeeded() {
+      if (
+        typeof DeviceMotionEvent !== 'undefined' &&
+        typeof DeviceMotionEvent.requestPermission === 'function'
+      ) {
+        DeviceMotionEvent.requestPermission()
+          .then(permissionState => {
+            if (permissionState === 'granted') {
+              window.addEventListener('devicemotion', handleMotion);
+            } else {
+              alert("加速度センサーの使用が許可されませんでした。");
+            }
+          })
+          .catch(console.error);
+      } else {
+        window.addEventListener('devicemotion', handleMotion);
+      }
+    }
+
+    function toggleMeasurement() {
+      isMeasuring = !isMeasuring;
+
+      if (isMeasuring) {
+        statusText.textContent = "測定中です…";
+        toggleButton.textContent = "測定終了";
+        prevAcceleration = null;
+        requestPermissionIfNeeded();
+      } else {
+        statusText.textContent = "測定していません";
+        toggleButton.textContent = "測定開始";
+        window.removeEventListener('devicemotion', handleMotion);
+      }
+    }
+
+    toggleButton.addEventListener('click', toggleMeasurement);
+  </script>
+
 </body>
 </html>
