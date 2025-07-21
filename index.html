@@ -35,7 +35,6 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
     import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-    // Firebase設定
     const firebaseConfig = {
       apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
       authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
@@ -48,31 +47,55 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    async function saveGeoPoint(lat, lng, diff) {
-      try {
-        await addDoc(collection(db, "barriers"), {
-          lat,
-          lng,
-          accelerationChange: diff,
-          timestamp: new Date()
-        });
-        console.log("Firestoreに保存成功");
-      } catch (e) {
-        console.error("Firestore保存失敗", e);
-      }
-    }
+    // 計測用変数
+    let isMeasuring = false;
+    let prevAcceleration = null;
+    const accelerationThreshold = 0.5;
 
     const accelerationDisplay = document.getElementById('accelerationValue');
     const statusText = document.getElementById('statusText');
     const toggleButton = document.getElementById('toggleButton');
 
-    let isMeasuring = false;
-    let prevAcceleration = null;
-    let lastSavedTime = 0;
-    const accelerationThreshold = 1.0; // 少し高めに設定（マンホールを除くイメージ）
+    // セッション管理用
+    let sessionId = null;
+    let sessionStartTime = null;
+
+    function generateSessionId(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const h = String(date.getHours()).padStart(2, '0');
+      const bucket = Math.floor(date.getMinutes() / 120); // 2時間区切りのバケット
+      return `${y}${m}${d}_${h}_${bucket}`;
+    }
 
     function updateAccelerationDisplay(value) {
       accelerationDisplay.textContent = value.toFixed(1);
+    }
+
+    async function saveGeoPoint(lat, lng, diff) {
+      const now = new Date();
+      const elapsed = now - sessionStartTime;
+
+      if (elapsed >= 2 * 60 * 60 * 1000) {
+        // 2時間経過でセッション更新
+        sessionStartTime = now;
+        sessionId = generateSessionId(now);
+        console.log("セッション更新:", sessionId);
+      }
+
+      try {
+        await addDoc(collection(db, "barriers"), {
+          sessionId,
+          lat,
+          lng,
+          accelerationChange: diff,
+          timestamp: now
+        });
+        console.log("保存成功:", lat, lng, diff, sessionId);
+      } catch (e) {
+        console.error("Firestore保存失敗:", e);
+      }
     }
 
     function handleMotion(event) {
@@ -84,17 +107,11 @@
       const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
       updateAccelerationDisplay(total);
 
-      const now = Date.now();
       if (prevAcceleration !== null) {
         const diff = Math.abs(total - prevAcceleration);
-        if (diff > accelerationThreshold && (now - lastSavedTime) > 3000) {
+        if (diff > accelerationThreshold) {
           navigator.geolocation.getCurrentPosition(async (position) => {
-            await saveGeoPoint(
-              position.coords.latitude,
-              position.coords.longitude,
-              parseFloat(diff.toFixed(1))
-            );
-            lastSavedTime = Date.now();
+            await saveGeoPoint(position.coords.latitude, position.coords.longitude, diff.toFixed(1));
           }, (error) => {
             console.error("位置情報取得失敗:", error);
           }, { enableHighAccuracy: true });
@@ -127,6 +144,10 @@
       isMeasuring = !isMeasuring;
 
       if (isMeasuring) {
+        sessionStartTime = new Date();
+        sessionId = generateSessionId(sessionStartTime);
+        console.log("新しいセッション開始:", sessionId);
+
         statusText.textContent = "測定中です…";
         toggleButton.textContent = "測定終了";
         prevAcceleration = null;
