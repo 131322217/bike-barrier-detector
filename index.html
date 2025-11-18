@@ -1,86 +1,21 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bike Barrier Detector</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 10px; }
-    #accelerationValue { font-size: 1.2em; margin-top: 10px; }
-    #statusText { margin-top: 10px; }
-    #toggleButton { margin-top: 10px; font-size: 1em; padding: 8px 16px; }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<h1>加速度測定＆Firestore保存</h1>
-
-<button id="toggleButton">測定開始<!DOCTYPE html>
-  <html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Bike Barrier Detector</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        padding: 10px;
-      }
-      #accelerationValue {
-        font-size: 1.2em;
-        margin-top: 10px;
-      }
-      #statusText {
-        margin-top: 10px;
-      }
-      #toggleButton {
-        margin-top: 10px;
-        font-size: 1em;
-        padding: 8px 16px;
-      }
-    </style>
-  </head>
-  <body>
-  
-    <h1>加速度測定＆Firestore保存</h1>
-  
-    <button id="toggleButton">測定開始</button>
-    <div id="statusText">測定していません</div>
-    <div>加速度合計値: <span id="accelerationValue">0.0</span></div>
-  
-    <!-- JSをモジュールとして読み込む -->
-    <script type="module" src="script.js"></script>
-  
-  </body><!DOCTYPE html>
-  <html lang="ja">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Bike Barrier Detector</title>
-    <style>
-      body { font-family: Arial, sans-serif; padding: 10px; }
-      #accelerationValue { font-size: 1.2em; margin-top: 10px; }
-      #statusText { margin-top: 10px; }
-      #toggleButton { margin-top: 10px; font-size: 1em; padding: 8px 16px; }
-    </style>
-  </head>
-  <body>
+  <div class="container">
     <h1>加速度測定＆Firestore保存（5件バッチ送信）</h1>
-  
-    <button id="toggleButton">測定開始</button>
+
     <div id="statusText">測定していません</div>
-    <div>加速度合計値: <span id="accelerationValue">0.0</span></div>
-  
-    <script type="module" src="script.js"></script>
-  </body>
-  </html>
-  
-  </html>
-  </button>
-<div id="statusText">測定していません</div>
-<div>加速度合計値: <span id="accelerationValue">0.0</span></div>
+    <div>加速度合計値: <span id="accelerationText">0.0</span></div>
+    
+    <button id="startStopBtn">測定開始</button>
+  </div>
 
-<script type="module" src="app.js"></script>
-
+  <script type="module" src="script.js"></script>
 </body>
 </html>

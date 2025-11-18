@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, doc, setDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, collection, doc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// Firebase 初期化
+// Firebase初期化
 const firebaseConfig = {
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
@@ -10,26 +10,28 @@ const firebaseConfig = {
   messagingSenderId: "556503472203",
   appId: "1:556503472203:web:d248c2bd6f5773ea9dd5ce"
 };
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // DOM
-const accelerationDisplay = document.getElementById('accelerationValue');
+const accelerationText = document.getElementById('accelerationText');
 const statusText = document.getElementById('statusText');
-const toggleButton = document.getElementById('toggleButton');
+const startStopBtn = document.getElementById('startStopBtn');
 
 // 計測用
 let isMeasuring = false;
 let prevAcceleration = null;
 const accelerationThreshold = 0.5;
-let sessionId = null;
-let sessionStartTime = null;
 
-// バッチ保存用
+// バッチ送信用
 let batchPoints = [];
 const BATCH_SIZE = 5;
 
-// セッションID生成 (分まで)
+let sessionId = null;
+let sessionStartTime = null;
+
+// セッションID生成 (YYYY-MM-DD_HH-MM)
 function generateSessionId(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -39,26 +41,35 @@ function generateSessionId(date) {
   return `${y}-${m}-${d}_${h}-${min}`;
 }
 
+// 表示更新
 function updateAccelerationDisplay(value) {
-  accelerationDisplay.textContent = value.toFixed(1);
+  accelerationText.textContent = value.toFixed(1);
 }
 
-// Firestoreにバッチ送信 (配列マージ)
+// Firestoreにバッチ送信
 async function saveBatch() {
-  if (batchPoints.length === 0) return;
+  if (!sessionId || batchPoints.length === 0) return;
+
   const docRef = doc(db, "barriers", sessionId);
+
   try {
-    await setDoc(docRef, { points: arrayUnion(...batchPoints) }, { merge: true });
-    console.log(`バッチ送信成功: ${batchPoints.length} 件`);
+    // ドキュメントがまだない場合は作成
+    await updateDoc(docRef, {
+      points: arrayUnion(...batchPoints)
+    }).catch(async () => {
+      // ドキュメントがない場合
+      await updateDoc(docRef, { points: arrayUnion(...batchPoints) });
+    });
+    console.log(`Firestoreに送信: ${batchPoints.length}件`);
     batchPoints = [];
   } catch (e) {
     console.error("Firestore保存失敗:", e);
   }
 }
 
+// 加速度取得
 function handleMotion(event) {
   if (!isMeasuring) return;
-
   const acc = event.acceleration;
   if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
 
@@ -68,21 +79,16 @@ function handleMotion(event) {
   if (prevAcceleration !== null) {
     const diff = Math.abs(total - prevAcceleration);
     if (diff > accelerationThreshold) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          batchPoints.push({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            accelerationChange: diff.toFixed(1),
-            timestamp: new Date()
-          });
-          if (batchPoints.length >= BATCH_SIZE) {
-            saveBatch();
-          }
-        },
-        (err) => console.error("位置情報取得失敗:", err),
-        { enableHighAccuracy: true }
-      );
+      navigator.geolocation.getCurrentPosition((position) => {
+        batchPoints.push({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accelerationChange: diff.toFixed(1),
+          timestamp: new Date()
+        });
+
+        if (batchPoints.length >= BATCH_SIZE) saveBatch();
+      }, (err) => console.error("位置情報取得失敗:", err), { enableHighAccuracy: true });
     }
   }
 
@@ -92,33 +98,31 @@ function handleMotion(event) {
 // iOS用 permission
 function requestPermissionIfNeeded() {
   if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-    DeviceMotionEvent.requestPermission()
-      .then(state => {
-        if (state === 'granted') window.addEventListener('devicemotion', handleMotion);
-        else alert("加速度センサーの使用が許可されませんでした。");
-      })
-      .catch(console.error);
+    DeviceMotionEvent.requestPermission().then(state => {
+      if (state === 'granted') window.addEventListener('devicemotion', handleMotion);
+      else alert("加速度センサーの使用が許可されませんでした。");
+    }).catch(console.error);
   } else {
     window.addEventListener('devicemotion', handleMotion);
   }
 }
 
-// 開始/終了トグル
-toggleButton.addEventListener('click', () => {
+// トグル
+startStopBtn.addEventListener('click', () => {
   isMeasuring = !isMeasuring;
 
   if (isMeasuring) {
     sessionStartTime = new Date();
     sessionId = generateSessionId(sessionStartTime);
     statusText.textContent = "測定中です…";
-    toggleButton.textContent = "測定終了";
+    startStopBtn.textContent = "測定終了";
     prevAcceleration = null;
     batchPoints = [];
     requestPermissionIfNeeded();
   } else {
     statusText.textContent = "測定していません";
-    toggleButton.textContent = "測定開始";
+    startStopBtn.textContent = "測定開始";
     window.removeEventListener('devicemotion', handleMotion);
-    saveBatch(); // 残りも送信
+    saveBatch(); // 残りを送信
   }
 });
