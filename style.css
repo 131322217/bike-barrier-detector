@@ -44,11 +44,8 @@ body, html {
 }
 
 #errorBox {
-  margin-top: 20px;
-  font-size: 0.9rem;
-  color: #fff;
-  background: #e74c3c;
-  padding: 10px;
-  border-radius: 6px;
-  display: none; /* 初期は非表示 */
+  margin-top: 12px;
+  color: red;
+  font-size: 1rem;
+  display: none;
 }

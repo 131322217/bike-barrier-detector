@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, doc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// Firebase初期化
+// Firebase設定
 const firebaseConfig = {
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
@@ -15,154 +15,95 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // DOM
-const accelerationText = document.getElementById("accelerationText");
+const btn = document.getElementById("startStopBtn");
 const statusText = document.getElementById("statusText");
-const startStopBtn = document.getElementById("startStopBtn");
+const accValue = document.getElementById("accValue");
 const errorBox = document.getElementById("errorBox");
 
-// エラー表示
-function showError(msg) {
-  errorBox.textContent = msg;
-  errorBox.style.display = "block";
-}
-
-// エラー非表示
-function clearError() {
-  errorBox.style.display = "none";
-}
-
-// 計測用
-let isMeasuring = false;
-let prevAcceleration = null;
-const accelerationThreshold = 0.5;
-
-// バッチ送信用
-let batchPoints = [];
-const BATCH_SIZE = 5;
-
+// 状態
+let measuring = false;
 let sessionId = null;
+let prevAcc = null;
 
-// セッションID生成 YYYY-MM-DD_HH-MM
-function generateSessionId(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  const h = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${y}-${m}-${d}_${h}-${min}`;
+// セッションID
+function makeSessionId() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    + `-${String(d.getDate()).padStart(2,'0')}_`
+    + `${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-// Firestoreへバッチ送信
-async function saveBatch() {
-  if (!sessionId || batchPoints.length === 0) return;
-
-  const docRef = doc(db, "barriers", sessionId);
-
-  try {
-    await updateDoc(docRef, {
-      points: arrayUnion(...batchPoints)
-    }).catch(async () => {
-      await updateDoc(docRef, {
-        points: arrayUnion(...batchPoints)
-      });
-    });
-
-    console.log(`送信成功: ${batchPoints.length}件`);
-    batchPoints = [];
-  } catch (e) {
-    showError("Firestore保存でエラーが発生しました: " + e.message);
-  }
+// 画面エラー表示
+function showError(msg) {
+  errorBox.style.display = "block";
+  errorBox.textContent = msg;
+  console.error(msg);
 }
 
-// 加速度イベント
-function handleMotion(event) {
-  try {
-    if (!isMeasuring) return;
-    clearError();
+// 加速度処理
+function handleMotion(e) {
+  if (!measuring) return;
 
-    const acc = event.acceleration;
-    if (!acc || acc.x === null || acc.y === null || acc.z === null) {
-      showError("加速度データが取得できません");
-      return;
-    }
+  const acc = e.acceleration;
+  if (!acc || acc.x == null) return;
 
-    const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
-    accelerationText.textContent = total.toFixed(1);
+  const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
+  accValue.textContent = total.toFixed(1);
 
-    if (prevAcceleration !== null) {
-      const diff = Math.abs(total - prevAcceleration);
+  if (prevAcc !== null) {
+    const diff = Math.abs(total - prevAcc);
 
-      if (diff > accelerationThreshold) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            batchPoints.push({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              accelerationChange: diff.toFixed(1),
-              timestamp: new Date()
-            });
-
-            if (batchPoints.length >= BATCH_SIZE) {
-              saveBatch();
-            }
-          },
-          (err) => showError("位置情報エラー: " + err.message),
-          { enableHighAccuracy: true }
-        );
-      }
-    }
-
-    prevAcceleration = total;
-  } catch (err) {
-    showError("加速度処理中にエラー: " + err.message);
-  }
-}
-
-// iOS用 permission
-function requestPermissionIfNeeded() {
-  try {
-    clearError();
-
-    if (typeof DeviceMotionEvent !== "undefined" &&
-        typeof DeviceMotionEvent.requestPermission === "function") {
-
-      DeviceMotionEvent.requestPermission().then(state => {
-        if (state === "granted") {
-          window.addEventListener("devicemotion", handleMotion);
-        } else {
-          showError("加速度センサーの権限が必要です");
+    if (diff > 0.5) {
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        try {
+          await addDoc(collection(db, "barriers", sessionId, "data"), {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            acceleration: diff.toFixed(1),
+            timestamp: new Date()
+          });
+        } catch (e) {
+          showError("Firestore 保存失敗: " + e.message);
         }
-      }).catch(err => showError("権限要求エラー: " + err.message));
-
-    } else {
-      window.addEventListener("devicemotion", handleMotion);
+      }, (err) => {
+        showError("位置情報エラー: " + err.message);
+      });
     }
-  } catch (err) {
-    showError("権限処理でエラー: " + err.message);
+  }
+
+  prevAcc = total;
+}
+
+// iOS permission
+function requestPermission() {
+  if (DeviceMotionEvent?.requestPermission) {
+    DeviceMotionEvent.requestPermission().then(res => {
+      if (res === "granted") {
+        window.addEventListener("devicemotion", handleMotion);
+      } else {
+        showError("加速度センサーが許可されませんでした");
+      }
+    });
+  } else {
+    window.addEventListener("devicemotion", handleMotion);
   }
 }
 
-// ボタン
-startStopBtn.addEventListener("click", () => {
-  isMeasuring = !isMeasuring;
-  clearError();
+// ボタンクリック
+btn.addEventListener("click", () => {
+  measuring = !measuring;
 
-  if (isMeasuring) {
-    const now = new Date();
-    sessionId = generateSessionId(now);
+  if (measuring) {
+    errorBox.style.display = "none";
+    sessionId = makeSessionId();
+    prevAcc = null;
+    statusText.textContent = "測定中...";
+    btn.textContent = "停止";
 
-    statusText.textContent = "測定中…";
-    startStopBtn.textContent = "測定終了";
-
-    batchPoints = [];
-    prevAcceleration = null;
-
-    requestPermissionIfNeeded();
+    requestPermission();
   } else {
-    statusText.textContent = "測定していません";
-    startStopBtn.textContent = "測定開始";
-
+    statusText.textContent = "停止中";
+    btn.textContent = "測定開始";
     window.removeEventListener("devicemotion", handleMotion);
-    saveBatch(); // 残り送信
   }
 });
