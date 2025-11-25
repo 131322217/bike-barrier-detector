@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, collection, doc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, doc, updateDoc, setDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// Firebase初期化
+// Firebase設定
 const firebaseConfig = {
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
@@ -15,114 +15,125 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // DOM
-const accelerationText = document.getElementById('accelerationText');
-const statusText = document.getElementById('statusText');
-const startStopBtn = document.getElementById('startStopBtn');
+const startStopBtn = document.getElementById("startStopBtn");
+const statusText = document.getElementById("statusText");
+const accelValue = document.getElementById("accelerationValue");
 
-// 計測用
+// 測定管理
 let isMeasuring = false;
-let prevAcceleration = null;
-const accelerationThreshold = 0.5;
+let prevAcc = null;
+const accThreshold = 0.5;
 
-// バッチ送信用
+// セッション
+let sessionId = null;
+
+// バッチ
 let batchPoints = [];
 const BATCH_SIZE = 5;
 
-let sessionId = null;
-let sessionStartTime = null;
-
-// セッションID生成 (YYYY-MM-DD_HH-MM)
+// セッションID生成
 function generateSessionId(date) {
   const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const h = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
   return `${y}-${m}-${d}_${h}-${min}`;
 }
 
-// 表示更新
-function updateAccelerationDisplay(value) {
-  accelerationText.textContent = value.toFixed(1);
-}
-
-// Firestoreにバッチ送信
-async function saveBatch() {
-  if (!sessionId || batchPoints.length === 0) return;
+// Firestoreへ5件まとめて送信
+async function sendBatchToFirestore() {
+  if (batchPoints.length === 0) return;
 
   const docRef = doc(db, "barriers", sessionId);
 
   try {
-    // ドキュメントがまだない場合は作成
     await updateDoc(docRef, {
       points: arrayUnion(...batchPoints)
-    }).catch(async () => {
-      // ドキュメントがない場合
-      await updateDoc(docRef, { points: arrayUnion(...batchPoints) });
     });
-    console.log(`Firestoreに送信: ${batchPoints.length}件`);
-    batchPoints = [];
   } catch (e) {
-    console.error("Firestore保存失敗:", e);
+    // ドキュメントがまだ存在しない場合 setDoc で作成
+    await setDoc(docRef, {
+      points: batchPoints
+    });
   }
+
+  console.log(`Firestoreへ ${batchPoints.length} 件送信完了`);
+  batchPoints = [];
 }
 
-// 加速度取得
+// 加速度データ処理
 function handleMotion(event) {
   if (!isMeasuring) return;
+
   const acc = event.acceleration;
   if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
 
   const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
-  updateAccelerationDisplay(total);
+  accelValue.textContent = total.toFixed(1);
 
-  if (prevAcceleration !== null) {
-    const diff = Math.abs(total - prevAcceleration);
-    if (diff > accelerationThreshold) {
-      navigator.geolocation.getCurrentPosition((position) => {
+  if (prevAcc !== null) {
+    const diff = Math.abs(total - prevAcc);
+
+    if (diff > accThreshold) {
+      navigator.geolocation.getCurrentPosition((pos) => {
         batchPoints.push({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
           accelerationChange: diff.toFixed(1),
           timestamp: new Date()
         });
 
-        if (batchPoints.length >= BATCH_SIZE) saveBatch();
-      }, (err) => console.error("位置情報取得失敗:", err), { enableHighAccuracy: true });
+        if (batchPoints.length >= BATCH_SIZE) {
+          sendBatchToFirestore();
+        }
+      });
     }
   }
-
-  prevAcceleration = total;
+  prevAcc = total;
 }
 
-// iOS用 permission
-function requestPermissionIfNeeded() {
-  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-    DeviceMotionEvent.requestPermission().then(state => {
-      if (state === 'granted') window.addEventListener('devicemotion', handleMotion);
-      else alert("加速度センサーの使用が許可されませんでした。");
-    }).catch(console.error);
+// iOS permission
+function requestSensorPermission() {
+  if (
+    typeof DeviceMotionEvent !== "undefined" &&
+    typeof DeviceMotionEvent.requestPermission === "function"
+  ) {
+    DeviceMotionEvent.requestPermission().then((state) => {
+      if (state === "granted") {
+        window.addEventListener("devicemotion", handleMotion);
+      } else {
+        alert("加速度センサーの許可が必要です");
+      }
+    });
   } else {
-    window.addEventListener('devicemotion', handleMotion);
+    window.addEventListener("devicemotion", handleMotion);
   }
 }
 
-// トグル
-startStopBtn.addEventListener('click', () => {
+// ボタン動作
+startStopBtn.addEventListener("click", () => {
   isMeasuring = !isMeasuring;
 
   if (isMeasuring) {
-    sessionStartTime = new Date();
-    sessionId = generateSessionId(sessionStartTime);
-    statusText.textContent = "測定中です…";
+    // 開始
+    const now = new Date();
+    sessionId = generateSessionId(now);
+    statusText.textContent = "測定中…";
     startStopBtn.textContent = "測定終了";
-    prevAcceleration = null;
+
+    prevAcc = null;
     batchPoints = [];
-    requestPermissionIfNeeded();
+
+    requestSensorPermission();
   } else {
+    // 終了
     statusText.textContent = "測定していません";
     startStopBtn.textContent = "測定開始";
-    window.removeEventListener('devicemotion', handleMotion);
-    saveBatch(); // 残りを送信
+
+    window.removeEventListener("devicemotion", handleMotion);
+
+    // バッチに残っていたら送信
+    sendBatchToFirestore();
   }
 });
