@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, collection, doc, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, doc, setDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// --- Firebase 初期化 ---
+// Firebase初期化
 const firebaseConfig = {
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
@@ -13,24 +13,29 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// --- DOM ---
-const startStopBtn = document.getElementById("startStopBtn");
-const statusText = document.getElementById("statusText");
-const accelerationText = document.getElementById("accelerationText");
-const errorText = document.getElementById("errorText");
+// DOM
+const startStopBtn = document.getElementById('startStopBtn');
+const statusText = document.getElementById('statusText');
+const accelerationText = document.getElementById('accelerationText');
 
-// --- 計測用 ---
+// 計測用
 let isMeasuring = false;
 let prevAcc = null;
-const accelerationThreshold = 1.0; // 変化の閾値
+const accelerationThreshold = 0.5;
+
+// バッファ
+let preBuffer = [];
+let postBuffer = [];
+let collectingPost = false;
+const POST_COUNT = 2; // イベント後に収集する件数
+
+// セッション
 let sessionId = null;
-let sessionStartTime = null;
 
-// --- バッファ（直近3秒） ---
-let buffer = [];
-const BUFFER_MS = 3000;
+// 1秒ごとにデータ保存
+let intervalId = null;
 
-// --- セッションID生成 ---
+// セッションID生成
 function generateSessionId(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -40,98 +45,97 @@ function generateSessionId(date) {
   return `${y}-${m}-${d}_${h}-${min}`;
 }
 
-// --- バッファ内データを Firebase に送信 ---
-async function saveBatch(points) {
-  if (!points.length) return;
+// Firestore保存
+async function saveToFirestore(points) {
+  if (!sessionId || points.length === 0) return;
+  const docRef = doc(db, "barriers", sessionId);
   try {
-    const docRef = doc(db, "barriers", sessionId);
-    // points を配列として保存
-    await addDoc(collection(docRef, "data"), { points });
-    console.log("Firebase送信成功:", points.length, "件");
+    await setDoc(docRef, { points: arrayUnion(...points) }, { merge: true });
+    console.log("保存成功", points);
   } catch (e) {
-    console.error("Firebase送信失敗:", e);
-    errorText.textContent = "Firebase送信失敗: " + e.message;
+    console.error("保存失敗", e);
   }
 }
 
-// --- センサー処理 ---
+// データ処理
 function handleMotion(event) {
   if (!isMeasuring) return;
-
   const acc = event.acceleration;
-  if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
+  if (!acc || acc.x === null) return;
 
-  const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
+  const x = acc.x, y = acc.y, z = acc.z;
+  const total = Math.abs(x) + Math.abs(y) + Math.abs(z);
 
-  const xDiff = prevAcc ? acc.x - prevAcc.x : 0;
-  const yDiff = prevAcc ? acc.y - prevAcc.y : 0;
-  const zDiff = prevAcc ? acc.z - prevAcc.z : 0;
-  const totalDiff = prevAcc ? Math.abs(total - prevAcc.total) : 0;
+  let xDiff = 0, yDiff = 0, zDiff = 0, totalDiff = 0;
+  if (prevAcc) {
+    xDiff = Math.abs(x - prevAcc.x);
+    yDiff = Math.abs(y - prevAcc.y);
+    zDiff = Math.abs(z - prevAcc.z);
+    totalDiff = Math.abs(total - prevAcc.total);
+  }
 
-  const data = {
-    x: acc.x,
-    y: acc.y,
-    z: acc.z,
-    total,
-    xDiff,
-    yDiff,
-    zDiff,
-    totalDiff,
+  const point = {
+    x, y, z, xDiff, yDiff, zDiff, totalDiff, total,
     timestamp: new Date()
   };
 
-  buffer.push(data);
+  prevAcc = { x, y, z, total };
 
-  // 古いデータ削除
-  const cutoff = Date.now() - BUFFER_MS;
-  buffer = buffer.filter(d => d.timestamp.getTime() >= cutoff);
-
-  accelerationText.textContent = `加速度合計: ${total.toFixed(2)} / 差分: ${totalDiff.toFixed(2)}`;
-
+  // イベント判定
   if (totalDiff > accelerationThreshold) {
-    // 閾値超えたら直近3秒分を送信
-    saveBatch(buffer);
-    buffer = []; // 送信後クリア
+    collectingPost = true;
+    const combined = [...preBuffer, point];
+    preBuffer = []; // まとめたらクリア
+    postBuffer = [];
+    collectingPost = POST_COUNT; // 後ろ2件収集中
+    saveToFirestore(combined);
+  } else {
+    // preBuffer管理
+    preBuffer.push(point);
+    if (preBuffer.length > 2) preBuffer.shift();
+
+    // postBuffer収集中
+    if (collectingPost > 0) {
+      postBuffer.push(point);
+      collectingPost--;
+      if (collectingPost === 0) {
+        saveToFirestore(postBuffer);
+        postBuffer = [];
+      }
+    }
   }
 
-  prevAcc = { x: acc.x, y: acc.y, z: acc.z, total };
+  accelerationText.textContent = `加速度合計: ${total.toFixed(2)}`;
 }
 
-// --- iOS permission ---
-function requestPermissionIfNeeded() {
-  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+// iOS用 permission
+function requestPermission() {
+  if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
     DeviceMotionEvent.requestPermission()
       .then(state => {
-        if (state === 'granted') {
-          window.addEventListener("devicemotion", handleMotion);
-        } else {
-          errorText.textContent = "加速度センサー使用が許可されませんでした";
-        }
-      }).catch(e => errorText.textContent = "Error: " + e.message);
+        if (state === 'granted') window.addEventListener('devicemotion', handleMotion);
+      })
+      .catch(console.error);
   } else {
-    window.addEventListener("devicemotion", handleMotion);
+    window.addEventListener('devicemotion', handleMotion);
   }
 }
 
-// --- 開始/停止ボタン ---
-startStopBtn.addEventListener("click", () => {
+// 開始/終了ボタン
+startStopBtn.addEventListener('click', () => {
   isMeasuring = !isMeasuring;
-
   if (isMeasuring) {
-    sessionStartTime = new Date();
-    sessionId = generateSessionId(sessionStartTime);
+    sessionId = generateSessionId(new Date());
     statusText.textContent = "測定中…";
     startStopBtn.textContent = "測定終了";
-    buffer = [];
     prevAcc = null;
-    requestPermissionIfNeeded();
-    errorText.textContent = "";
+    preBuffer = [];
+    postBuffer = [];
+    collectingPost = 0;
+    requestPermission();
   } else {
-    statusText.textContent = "測定停止";
+    statusText.textContent = "測定終了";
     startStopBtn.textContent = "測定開始";
-    window.removeEventListener("devicemotion", handleMotion);
-    // 終了時に残りのバッファも送信
-    saveBatch(buffer);
-    buffer = [];
+    window.removeEventListener('devicemotion', handleMotion);
   }
 });
