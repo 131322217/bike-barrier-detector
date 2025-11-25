@@ -1,19 +1,18 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bike Barrier Detector</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="container">
-    <h1>加速度測定＆xyz別で保存</h1>
-
-    <div id="statusText">測定していません</div>
-    <div>加速度合計値: <span id="accelerationText">0.0</span></div>
+    <h1>加速度測定＆Firestore保存</h1>
     <button id="startStopBtn">測定開始</button>
-    <div id="errorText" style="color:red; margin-top:10px;"></div>
+    <div id="statusText">測定していません</div>
+    <div id="accelerationText">加速度: 0.0</div>
+    <div id="errorText" style="color:red;"></div>
   </div>
 
   <script type="module" src="script.js"></script>

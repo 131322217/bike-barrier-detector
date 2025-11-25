@@ -33,7 +33,7 @@ body, html {
 
 #statusText {
   font-size: 1.2rem;
-  margin-bottom: 8px;
+  margin-top: 8px;
   color: #333;
 }
 
@@ -41,4 +41,9 @@ body, html {
   margin-top: 12px;
   font-size: 1rem;
   color: #555;
+}
+
+#errorText {
+  margin-top: 10px;
+  font-size: 0.9rem;
 }
