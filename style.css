@@ -42,3 +42,13 @@ body, html {
   font-size: 1rem;
   color: #555;
 }
+
+#errorBox {
+  margin-top: 20px;
+  font-size: 0.9rem;
+  color: #fff;
+  background: #e74c3c;
+  padding: 10px;
+  border-radius: 6px;
+  display: none; /* 初期は非表示 */
+}
