@@ -2,50 +2,65 @@ body, html {
   height: 100%;
   margin: 0;
   font-family: Arial, sans-serif;
-  display: flex;
-  justify-content: center;
-  align-items: center;
   background: #f0f0f0;
 }
 
 .container {
-  text-align: center;
-  width: 90%;
-  max-width: 400px;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+h1 {
+  font-size: 1.1rem;
+  margin: 0 0 8px 0;
+}
+
+/* コントロール部 */
+#controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 #startStopBtn {
-  font-size: 1.5rem;
-  padding: 12px 20px;
-  margin-top: 12px;
-  width: 100%;
+  font-size: 1rem;
+  padding: 8px 14px;
   cursor: pointer;
   border: none;
   border-radius: 6px;
   background-color: #2e86de;
   color: white;
-  transition: background-color 0.3s ease;
-}
-
-#startStopBtn:hover {
-  background-color: #1b4f72;
 }
 
 #statusText {
-  font-size: 1.2rem;
-  margin-bottom: 8px;
+  font-size: 0.95rem;
   color: #333;
 }
 
 #accelerationText {
-  margin-top: 12px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   color: #555;
 }
+
+/* 地図 */
+#mapContainer {
+  margin-top: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
 #map {
   width: 100%;
-  height: 300px;
-  margin-top: 12px;
-  border: 2px solid #333;
-  border-radius: 6px;
+  height: 360px;
+}
+
+/* ポップアップの見た目を少し改善 */
+.leaflet-popup-content-wrapper {
+  font-size: 0.9rem;
 }
