@@ -15,17 +15,17 @@ const startStopBtn = document.getElementById('startStopBtn');
 const statusText = document.getElementById('statusText');
 const accelerationText = document.getElementById('accelerationText');
 
-// 計測フラグ
+// 測定フラグ
 let isMeasuring = false;
 let prevAcc = null;
 const threshold = 0.5;
 
-// map + GPS
+// map
 let map;
 let userMarker;
 let watchId = null;
-let lastPosition = null;
 
+// 地図セットアップ
 function initMap(lat, lng) {
   map = L.map('map').setView([lat, lng], 17);
 
@@ -36,13 +36,14 @@ function initMap(lat, lng) {
   userMarker = L.marker([lat, lng]).addTo(map);
 }
 
+// 現在位置追従
 function updateMap(lat, lng) {
   if (!map) return initMap(lat, lng);
   userMarker.setLatLng([lat, lng]);
   map.setView([lat, lng]);
 }
 
-// Firestore保存（イベント時のみ）
+// Firestore保存（イベントのみ）
 async function saveEvent(data) {
   try {
     await addDoc(collection(db, "events"), data);
@@ -56,13 +57,13 @@ async function saveEvent(data) {
 function handleMotion(event) {
   if (!isMeasuring) return;
 
-  const acc = event.acceleration || event.accelerationIncludingGravity;
+  const acc = event.acceleration;
   if (!acc || acc.x === null) return;
 
   const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
   accelerationText.textContent = `加速度合計: ${total.toFixed(2)}`;
 
-  if (prevAcc === null) {
+  if (!prevAcc) {
     prevAcc = total;
     return;
   }
@@ -74,24 +75,18 @@ function handleMotion(event) {
     const data = {
       lat: lastPosition.latitude,
       lng: lastPosition.longitude,
-      total,
-      totalDiff: diff,
+      diff: diff,
       timestamp: new Date()
     };
 
     saveEvent(data);
-    L.marker([data.lat, data.lng], { title: "イベント" }).addTo(map);
+    L.marker([data.lat, data.lng]).addTo(map);
   }
 }
 
-// iOS向け
-async function enableMotion() {
-  if (typeof DeviceMotionEvent.requestPermission === "function") {
-    await DeviceMotionEvent.requestPermission().catch(() => {});
-  }
-}
+let lastPosition = null;
 
-// GPS
+// GPS追跡
 function trackPosition() {
   watchId = navigator.geolocation.watchPosition(pos => {
     lastPosition = pos.coords;
@@ -100,11 +95,11 @@ function trackPosition() {
 }
 
 // ボタン操作
-startStopBtn.addEventListener('click', async () => {
+startStopBtn.addEventListener('click', () => {
   isMeasuring = !isMeasuring;
 
   if (isMeasuring) {
-    await enableMotion();
+    statusText.textContent = "測定中…";
     prevAcc = null;
 
     navigator.geolocation.getCurrentPosition(pos => {
@@ -115,7 +110,6 @@ startStopBtn.addEventListener('click', async () => {
 
     window.addEventListener('devicemotion', handleMotion);
 
-    statusText.textContent = "測定中…";
     startStopBtn.textContent = "測定終了";
   } else {
     statusText.textContent = "測定停止";

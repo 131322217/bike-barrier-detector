@@ -6,61 +6,26 @@ body, html {
 }
 
 .container {
-  width: 100%;
-  max-width: 900px;
+  width: 95%;
+  max-width: 500px;
   margin: 0 auto;
-  padding: 12px;
-  box-sizing: border-box;
-}
-
-h1 {
-  font-size: 1.1rem;
-  margin: 0 0 8px 0;
-}
-
-/* コントロール部 */
-#controls {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
+  text-align: center;
 }
 
 #startStopBtn {
-  font-size: 1rem;
-  padding: 8px 14px;
-  cursor: pointer;
+  font-size: 1.3rem;
+  padding: 10px;
+  width: 100%;
+  margin-top: 8px;
+  border-radius: 6px;
   border: none;
-  border-radius: 6px;
-  background-color: #2e86de;
-  color: white;
-}
-
-#statusText {
-  font-size: 0.95rem;
-  color: #333;
-}
-
-#accelerationText {
-  font-size: 0.95rem;
-  color: #555;
-}
-
-/* 地図 */
-#mapContainer {
-  margin-top: 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  overflow: hidden;
+  background: #0078ff;
+  color: #fff;
 }
 
 #map {
   width: 100%;
-  height: 360px;
-}
-
-/* ポップアップの見た目を少し改善 */
-.leaflet-popup-content-wrapper {
-  font-size: 0.9rem;
+  height: 300px;
+  margin-top: 10px;
+  border-radius: 8px;
 }
