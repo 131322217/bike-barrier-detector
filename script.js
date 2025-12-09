@@ -1,39 +1,36 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// Firebase
+// Firebase初期化
 const firebaseConfig = {
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
-  projectId: "bike-barrier-detector-1e128",
+  projectId: "bike-barrier-detector-1e128"
 };
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // DOM
-const startStopBtn = document.getElementById("startStopBtn");
-const statusText = document.getElementById("statusText");
-const accelerationText = document.getElementById("accelerationText");
+const startStopBtn = document.getElementById('startStopBtn');
+const statusText = document.getElementById('statusText');
+const accelerationText = document.getElementById('accelerationText');
 
-// 計測制御
+// 計測フラグ
 let isMeasuring = false;
-let prevTotal = null;
+let prevAcc = null;
 const threshold = 0.5;
 
-// GPS
+// map + GPS
 let map;
 let userMarker;
 let watchId = null;
 let lastPosition = null;
 
-// 通常保存タイマー
-let normalSaveTimer = null;
-
-// 地図
 function initMap(lat, lng) {
-  map = L.map("map").setView([lat, lng], 17);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap contributors",
+  map = L.map('map').setView([lat, lng], 17);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
   }).addTo(map);
 
   userMarker = L.marker([lat, lng]).addTo(map);
@@ -45,7 +42,7 @@ function updateMap(lat, lng) {
   map.setView([lat, lng]);
 }
 
-// Firestore保存
+// Firestore保存（イベント時のみ）
 async function saveEvent(data) {
   try {
     await addDoc(collection(db, "events"), data);
@@ -55,60 +52,42 @@ async function saveEvent(data) {
   }
 }
 
-async function saveNormalPosition() {
-  if (!lastPosition) return;
-
-  const data = {
-    lat: lastPosition.latitude,
-    lng: lastPosition.longitude,
-    timestamp: new Date(),
-    regular: true, // 通常データ判定用
-  };
-
-  try {
-    await addDoc(collection(db, "positions"), data);
-    console.log("通常位置保存", data);
-  } catch (e) {
-    console.error("通常保存失敗", e);
-  }
-}
-
 // 加速度処理
 function handleMotion(event) {
   if (!isMeasuring) return;
 
-  const acc = event.acceleration;
+  const acc = event.acceleration || event.accelerationIncludingGravity;
   if (!acc || acc.x === null) return;
 
   const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
   accelerationText.textContent = `加速度合計: ${total.toFixed(2)}`;
 
-  if (prevTotal === null) {
-    prevTotal = total;
+  if (prevAcc === null) {
+    prevAcc = total;
     return;
   }
 
-  const diff = Math.abs(total - prevTotal);
-  prevTotal = total;
+  const diff = Math.abs(total - prevAcc);
+  prevAcc = total;
 
-  // イベント検出
   if (diff > threshold && lastPosition) {
-    const ev = {
+    const data = {
       lat: lastPosition.latitude,
       lng: lastPosition.longitude,
-      total: total,
-      diff: diff,
-      timestamp: new Date(),
-      event: true
+      total,
+      totalDiff: diff,
+      timestamp: new Date()
     };
 
-    saveEvent(ev);
+    saveEvent(data);
+    L.marker([data.lat, data.lng], { title: "イベント" }).addTo(map);
+  }
+}
 
-    // 赤ピン（イベント）
-    L.marker([ev.lat, ev.lng], { icon: L.icon({
-      iconUrl: 'https://maps.gstatic.com/intl/en_us/mapfiles/ms/micons/red-dot.png',
-      iconSize: [32, 32]
-    }) }).addTo(map);
+// iOS向け
+async function enableMotion() {
+  if (typeof DeviceMotionEvent.requestPermission === "function") {
+    await DeviceMotionEvent.requestPermission().catch(() => {});
   }
 }
 
@@ -120,15 +99,13 @@ function trackPosition() {
   });
 }
 
-// ボタン
-startStopBtn.addEventListener("click", () => {
+// ボタン操作
+startStopBtn.addEventListener('click', async () => {
   isMeasuring = !isMeasuring;
 
   if (isMeasuring) {
-    console.log("測定開始");
-    statusText.textContent = "測定中…";
-    startStopBtn.textContent = "測定終了";
-    prevTotal = null;
+    await enableMotion();
+    prevAcc = null;
 
     navigator.geolocation.getCurrentPosition(pos => {
       lastPosition = pos.coords;
@@ -136,18 +113,16 @@ startStopBtn.addEventListener("click", () => {
       trackPosition();
     });
 
-    window.addEventListener("devicemotion", handleMotion);
+    window.addEventListener('devicemotion', handleMotion);
 
-    // 通常保存 8秒ごと
-    normalSaveTimer = setInterval(saveNormalPosition, 8000);
-
+    statusText.textContent = "測定中…";
+    startStopBtn.textContent = "測定終了";
   } else {
-    console.log("測定終了");
     statusText.textContent = "測定停止";
     startStopBtn.textContent = "測定開始";
 
-    window.removeEventListener("devicemotion", handleMotion);
+    window.removeEventListener('devicemotion', handleMotion);
+
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-    if (normalSaveTimer) clearInterval(normalSaveTimer);
   }
 });
