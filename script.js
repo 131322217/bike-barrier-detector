@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, deleteDoc, doc, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
 // Firebase初期化
 const firebaseConfig = {
@@ -19,11 +19,15 @@ const accelerationText = document.getElementById('accelerationText');
 let isMeasuring = false;
 let prevAcc = null;
 const threshold = 0.5;
+let logTimer = null;
 
-// map
+// map変数
 let map;
 let userMarker;
 let watchId = null;
+
+let lastPosition = null;
+let logIds = []; // 通常保存のID記録
 
 // 地図セットアップ
 function initMap(lat, lng) {
@@ -36,14 +40,30 @@ function initMap(lat, lng) {
   userMarker = L.marker([lat, lng]).addTo(map);
 }
 
-// 現在位置追従
+// 位置更新
 function updateMap(lat, lng) {
   if (!map) return initMap(lat, lng);
   userMarker.setLatLng([lat, lng]);
   map.setView([lat, lng]);
 }
 
-// Firestore保存（イベントのみ）
+// Firestore保存（通常ログ）※8秒おき
+async function saveLog() {
+  if (!lastPosition) return;
+  try {
+    const ref = await addDoc(collection(db, "logs"), {
+      lat: lastPosition.latitude,
+      lng: lastPosition.longitude,
+      type: "log",
+      timestamp: new Date()
+    });
+    logIds.push(ref.id);
+  } catch (e) {
+    console.error("通常ログ保存失敗", e);
+  }
+}
+
+// Firestore保存（イベント）
 async function saveEvent(data) {
   try {
     await addDoc(collection(db, "events"), data);
@@ -76,15 +96,19 @@ function handleMotion(event) {
       lat: lastPosition.latitude,
       lng: lastPosition.longitude,
       diff: diff,
+      type: "event",
       timestamp: new Date()
     };
 
     saveEvent(data);
-    L.marker([data.lat, data.lng]).addTo(map);
+    L.marker([data.lat, data.lng], {
+      icon: L.divIcon({
+        className: "red-pin",
+        html: "📍"
+      })
+    }).addTo(map);
   }
 }
-
-let lastPosition = null;
 
 // GPS追跡
 function trackPosition() {
@@ -92,6 +116,15 @@ function trackPosition() {
     lastPosition = pos.coords;
     updateMap(lastPosition.latitude, lastPosition.longitude);
   });
+}
+
+// 通常ログ削除（測定終了時）
+async function deleteLogs() {
+  const snap = await getDocs(collection(db, "logs"));
+  snap.forEach(async (d) => {
+    await deleteDoc(doc(db, "logs", d.id));
+  });
+  logIds = [];
 }
 
 // ボタン操作
@@ -110,13 +143,20 @@ startStopBtn.addEventListener('click', () => {
 
     window.addEventListener('devicemotion', handleMotion);
 
+    // 8秒毎に通常ログ保存
+    logTimer = setInterval(saveLog, 8000);
+
     startStopBtn.textContent = "測定終了";
+
   } else {
     statusText.textContent = "測定停止";
     startStopBtn.textContent = "測定開始";
 
     window.removeEventListener('devicemotion', handleMotion);
-
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    if (logTimer !== null) clearInterval(logTimer);
+
+    // 通常ログ削除！📌
+    deleteLogs();
   }
 });
