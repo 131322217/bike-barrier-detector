@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, doc, setDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
 // Firebase初期化
 const firebaseConfig = {
@@ -18,124 +18,119 @@ const startStopBtn = document.getElementById('startStopBtn');
 const statusText = document.getElementById('statusText');
 const accelerationText = document.getElementById('accelerationText');
 
-// 計測用
 let isMeasuring = false;
 let prevAcc = null;
 const accelerationThreshold = 0.5;
 
-// バッファ
-let preBuffer = [];
-let postBuffer = [];
-let collectingPost = false;
-const POST_COUNT = 2; // イベント後に収集する件数
-
-// セッション
+let dataArray = [];
+let intervalId = null;
 let sessionId = null;
 
-// 1秒ごとにデータ保存
-let intervalId = null;
-
-// セッションID生成
-function generateSessionId(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const h = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
-  return `${y}-${m}-${d}_${h}-${min}`;
+function generateSessionId() {
+  const d = new Date();
+  return `${d.getFullYear()}-${(d.getMonth()+1)
+    .toString().padStart(2,'0')}-${d.getDate()
+    .toString().padStart(2,'0')}_${d.getHours()
+    .toString().padStart(2,'0')}-${d.getMinutes()
+    .toString().padStart(2,'0')}-${d.getSeconds()
+    .toString().padStart(2,'0')}`;
 }
 
-// Firestore保存
-async function saveToFirestore(points) {
-  if (!sessionId || points.length === 0) return;
-  const docRef = doc(db, "barriers", sessionId);
-  try {
-    await setDoc(docRef, { points: arrayUnion(...points) }, { merge: true });
-    console.log("保存成功", points);
-  } catch (e) {
-    console.error("保存失敗", e);
+async function saveToFirestore() {
+  if (!sessionId) return;
+  const docRef = doc(db, "sessions", sessionId);
+  await setDoc(docRef, { data: dataArray }, { merge: true });
+  console.log("保存中", dataArray.length);
+}
+
+// データ整理（終了時に実行）
+async function cleanupFirestore() {
+  const docRef = doc(db, "sessions", sessionId);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) return;
+
+  const original = snap.data().data;
+  let cleaned = [];
+  let eventStreak = 0;
+
+  for (const p of original) {
+    if (p.isEvent) {
+      cleaned.push(p);
+      eventStreak = 0;
+    } else {
+      eventStreak++;
+      if (eventStreak <= 2) cleaned.push(p); // イベント前後2件だけ残す
+    }
   }
+
+  await setDoc(docRef, { data: cleaned }, { merge: true });
+  console.log("不要データ削除 => ", cleaned.length);
+  alert("不要データ削除完了！");
 }
 
-// データ処理
+// 加速度処理
 function handleMotion(event) {
   if (!isMeasuring) return;
+
   const acc = event.acceleration;
   if (!acc || acc.x === null) return;
 
-  const x = acc.x, y = acc.y, z = acc.z;
+  const { x, y, z } = acc;
   const total = Math.abs(x) + Math.abs(y) + Math.abs(z);
 
-  let xDiff = 0, yDiff = 0, zDiff = 0, totalDiff = 0;
+  let totalDiff = 0;
   if (prevAcc) {
-    xDiff = Math.abs(x - prevAcc.x);
-    yDiff = Math.abs(y - prevAcc.y);
-    zDiff = Math.abs(z - prevAcc.z);
     totalDiff = Math.abs(total - prevAcc.total);
   }
 
   const point = {
-    x, y, z, xDiff, yDiff, zDiff, totalDiff, total,
-    timestamp: new Date()
+    x, y, z,
+    total,
+    totalDiff,
+    isEvent: totalDiff > accelerationThreshold,
+    ts: Date.now()
   };
 
+  dataArray.push(point);
   prevAcc = { x, y, z, total };
-
-  // イベント判定
-  if (totalDiff > accelerationThreshold) {
-    collectingPost = true;
-    const combined = [...preBuffer, point];
-    preBuffer = []; // まとめたらクリア
-    postBuffer = [];
-    collectingPost = POST_COUNT; // 後ろ2件収集中
-    saveToFirestore(combined);
-  } else {
-    // preBuffer管理
-    preBuffer.push(point);
-    if (preBuffer.length > 2) preBuffer.shift();
-
-    // postBuffer収集中
-    if (collectingPost > 0) {
-      postBuffer.push(point);
-      collectingPost--;
-      if (collectingPost === 0) {
-        saveToFirestore(postBuffer);
-        postBuffer = [];
-      }
-    }
-  }
 
   accelerationText.textContent = `加速度合計: ${total.toFixed(2)}`;
 }
 
-// iOS用 permission
 function requestPermission() {
-  if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
-    DeviceMotionEvent.requestPermission()
-      .then(state => {
-        if (state === 'granted') window.addEventListener('devicemotion', handleMotion);
-      })
-      .catch(console.error);
+  if (typeof DeviceMotionEvent !== "undefined" 
+      && DeviceMotionEvent.requestPermission) {
+    DeviceMotionEvent.requestPermission().then(state => {
+      if (state === "granted") {
+        window.addEventListener("devicemotion", handleMotion);
+      }
+    });
   } else {
-    window.addEventListener('devicemotion', handleMotion);
+    window.addEventListener("devicemotion", handleMotion);
   }
 }
 
-// 開始/終了ボタン
-startStopBtn.addEventListener('click', () => {
+// Start / Stop
+startStopBtn.addEventListener("click", async () => {
   isMeasuring = !isMeasuring;
+
   if (isMeasuring) {
-    sessionId = generateSessionId(new Date());
+    sessionId = generateSessionId();
+    dataArray = [];
+    prevAcc = null;
     statusText.textContent = "測定中…";
     startStopBtn.textContent = "測定終了";
-    prevAcc = null;
-    preBuffer = [];
-    postBuffer = [];
-    collectingPost = 0;
     requestPermission();
+
+    intervalId = setInterval(saveToFirestore, 1000);
+
   } else {
     statusText.textContent = "測定終了";
     startStopBtn.textContent = "測定開始";
-    window.removeEventListener('devicemotion', handleMotion);
+    window.removeEventListener("devicemotion", handleMotion);
+
+    clearInterval(intervalId);
+    await saveToFirestore();
+    await cleanupFirestore();
   }
 });
