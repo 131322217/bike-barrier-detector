@@ -5,14 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bike Barrier Detector</title>
 <link rel="stylesheet" href="style.css">
+
+<!-- Leaflet地図CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
 </head>
 <body>
 <div class="container">
-  <h1>加速度測定＆Firestore保存</h1>
+  <h1>段差検出 & 地図表示</h1>
   <button id="startStopBtn">測定開始</button>
   <div id="statusText">測定していません</div>
   <div id="accelerationText">加速度合計: 0.0</div>
 </div>
+
+<!-- 地図エリア追加 -->
+<div id="map"></div>
+
 <script type="module" src="script.js"></script>
+<!-- Leaflet地図JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 </body>
 </html>
