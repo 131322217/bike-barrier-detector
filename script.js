@@ -1,69 +1,189 @@
-/* ==========================================================
-   Firestore 後処理：イベント前後3件だけ残し、他を削除する
-   ----------------------------------------------------------
-   必要なもの：
-     - db（Firestore）
-     - currentSessionId（同一セッションの絞り込み用）
-     - log()（画面ログ）
-     - startStopBtn（UI制御）
-   ========================================================== */
+/* -------------------------
+   Firebase
+------------------------- */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-   async function postProcessSession() {
-    log(`後処理を開始します…（sessionId: ${currentSessionId}）`);
-  
-    try {
-      const colRef = collection(db, "accel_data");
-      const q = query(colRef, where("sessionId", "==", currentSessionId));
-      const snap = await getDocs(q);
-  
-      if (snap.empty) {
-        log("データが見つからないため後処理をスキップします。");
-        startStopBtn.disabled = false;
-        return;
-      }
-  
-      // 1) Firestore → 配列化
-      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // 2) time 昇順に並べる
-      records.sort((a, b) => a.time - b.time);
-  
-      // 3) イベント index を収集
-      const eventIdxList = [];
-      records.forEach((r, i) => {
-        if (r.isEvent) eventIdxList.push(i);
-      });
-  
-      // 4) 残すべきIDリスト
-      const keep = new Set();
-  
-      // イベントは必ず残す
-      eventIdxList.forEach(i => keep.add(records[i].id));
-  
-      // イベント前後3件も残す
-      eventIdxList.forEach(idx => {
-        const min = Math.max(0, idx - 3);
-        const max = Math.min(records.length - 1, idx + 3);
-        for (let i = min; i <= max; i++) {
-          keep.add(records[i].id);
-        }
-      });
-  
-      // 5) 不要データ削除
-      let deleteCount = 0;
-      for (const r of records) {
-        if (!keep.has(r.id)) {
-          await deleteDoc(doc(db, "accel_data", r.id));
-          deleteCount++;
-        }
-      }
-  
-      log(`後処理完了：削除 ${deleteCount} 件 / 残す ${keep.size} 件`);
-    } catch (err) {
-      console.error(err);
-      log("後処理中にエラーが発生しました。");
-    }
-  
-    // ボタンの再有効化
-    startStopBtn.disabled = false;
+const firebaseConfig = {
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
+  projectId: "bike-barrier-detector-1e128"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+/* -------------------------
+   DOM
+------------------------- */
+const startStopBtn = document.getElementById("startStopBtn");
+const statusText = document.getElementById("statusText");
+const accelerationText = document.getElementById("accelerationText");
+const logBox = document.getElementById("log");
+
+function log(msg) {
+  console.log(msg);
+  logBox.textContent += msg + "\n";
+}
+
+/* -------------------------
+   状態管理
+------------------------- */
+let isMeasuring = false;
+let map, userMarker;
+let lastPosition = null;
+let watchId = null;
+let prevTotal = null;
+let currentSessionId = null;
+
+let lastSaveTime = 0;
+const normalSaveInterval = 1000; // 通常時は1秒に1回
+const diffThreshold = 3; // イベント判定
+
+/* -------------------------
+   Map
+------------------------- */
+function initMap(lat, lng) {
+  if (!map) {
+    map = L.map("map").setView([lat, lng], 17);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors"
+    }).addTo(map);
+
+    userMarker = L.marker([lat, lng]).addTo(map);
+  } else {
+    userMarker.setLatLng([lat, lng]);
+    map.setView([lat, lng]);
   }
-  
+}
+
+/* -------------------------
+   Firestore 保存
+------------------------- */
+async function saveData(data) {
+  try {
+    await addDoc(collection(db, "accel_data"), data);
+  } catch (e) {
+    console.error("保存失敗:", e);
+  }
+}
+
+/* -------------------------
+   GPS
+------------------------- */
+function startGPS() {
+  watchId = navigator.geolocation.watchPosition(pos => {
+    lastPosition = pos.coords;
+    initMap(lastPosition.latitude, lastPosition.longitude);
+  }, err => {
+    log("GPSエラー: " + err.message);
+  }, { enableHighAccuracy: true });
+}
+
+function stopGPS() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+}
+
+/* -------------------------
+   加速度
+------------------------- */
+async function requestMotionPermission() {
+  if (typeof DeviceMotionEvent.requestPermission === "function") {
+    const resp = await DeviceMotionEvent.requestPermission();
+    if (resp !== "granted") {
+      alert("加速度センサーの許可がありません");
+      return false;
+    }
+  }
+  return true;
+}
+
+function handleMotion(event) {
+  if (!isMeasuring) return;
+
+  const acc = event.acceleration;
+  if (!acc || acc.x === null) return;
+
+  const x = acc.x, y = acc.y, z = acc.z;
+  const total = Math.abs(x) + Math.abs(y) + Math.abs(z);
+  const now = Date.now();
+
+  accelerationText.textContent = `加速度: ${total.toFixed(2)}`;
+
+  if (!prevTotal) { prevTotal = total; return; }
+
+  const diff = Math.abs(total - prevTotal);
+  prevTotal = total;
+
+  if (!lastPosition) return;
+
+  const base = {
+    sessionId: currentSessionId,
+    time: Date.now(),
+    lat: lastPosition.latitude,
+    lng: lastPosition.longitude,
+    x, y, z,
+    total,
+    diff,
+    isEvent: diff > diffThreshold
+  };
+
+  if (base.isEvent) {
+    saveData(base);
+    log("イベント検出 diff=" + diff.toFixed(2));
+    L.marker([base.lat, base.lng], {
+      icon: L.icon({ iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png" })
+    }).addTo(map);
+    return;
+  }
+
+  if (now - lastSaveTime >= normalSaveInterval) {
+    lastSaveTime = now;
+    saveData(base);
+  }
+}
+
+/* -------------------------
+   計測開始 / 停止
+------------------------- */
+async function startMeasurement() {
+  log("測定開始");
+  isMeasuring = true;
+  currentSessionId = "sess_" + Date.now();
+  prevTotal = null;
+  statusText.textContent = "測定中…";
+
+  const ok = await requestMotionPermission();
+  if (!ok) return;
+
+  startGPS();
+  window.addEventListener("devicemotion", handleMotion);
+
+  startStopBtn.textContent = "測定停止";
+}
+
+function stopMeasurement() {
+  log("測定停止");
+  isMeasuring = false;
+
+  stopGPS();
+  window.removeEventListener("devicemotion", handleMotion);
+
+  startStopBtn.textContent = "測定開始";
+  statusText.textContent = "停止中";
+}
+
+/* -------------------------
+   ボタン
+------------------------- */
+startStopBtn.addEventListener("click", () => {
+  if (!isMeasuring) startMeasurement();
+  else stopMeasurement();
+});
+
+/* -------------------------
+   初期位置を地図に反映
+------------------------- */
+navigator.geolocation.getCurrentPosition(pos => {
+  initMap(pos.coords.latitude, pos.coords.longitude);
+});

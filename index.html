@@ -1,52 +1,32 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bike Barrier Detector</title>
+  <meta charset="UTF-8">
+  <title>加速度 & GPS Recorder</title>
 
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-sA+3sQ7qNl4h6m+yp43plP6fD68Zt1PVg9oP8oE+QUM=" crossorigin=""/>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  <link rel="stylesheet" href="style.css">
+  <style>
+    #map { width: 100%; height: 300px; margin-top: 10px; }
+    #log { white-space: pre-wrap; font-size: 14px; margin-top: 10px; }
+    button { padding: 12px; font-size: 16px; }
+  </style>
 </head>
+
 <body>
-  <div class="container">
-    <h1>加速度測定 & Firestore 保存（イベント重視）</h1>
+<h2>加速度センサー位置記録</h2>
 
-    <button id="startStopBtn">測定開始</button>
-    <div id="statusText">測定していません</div>
+<button id="startStopBtn">測定開始</button>
+<div id="statusText">待機中</div>
+<div id="accelerationText">加速度: -</div>
 
-    <div class="row">
-      <div>
-        <div class="label">加速度合計</div>
-        <div id="accTotal">0.00</div>
-      </div>
-      <div>
-        <div class="label">X</div>
-        <div id="accX">0.00</div>
-      </div>
-      <div>
-        <div class="label">Y</div>
-        <div id="accY">0.00</div>
-      </div>
-      <div>
-        <div class="label">Z</div>
-        <div id="accZ">0.00</div>
-      </div>
-    </div>
+<div id="map"></div>
 
-    <div id="map" aria-hidden="false"></div>
+<div id="log"></div>
 
-    <div id="logArea"></div>
-  </div>
-
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          integrity="sha256-o9N1j6w92rY+/8I35CJLiuXXRs0kGqXQoyX+JfXskMM=" crossorigin=""></script>
-
-  <!-- Main script (module) -->
-  <script type="module" src="script.js"></script>
+<!-- Firebase -->
+<script type="module" src="script.js"></script>
 </body>
 </html>
