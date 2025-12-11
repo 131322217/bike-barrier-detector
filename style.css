@@ -30,6 +30,9 @@ body, html {
   border-radius: 8px;
 }
 
-.red-pin {
-  font-size: 24px;
+#resultText {
+  font-size: 1rem;
+  margin-top: 8px;
+  color: #333;
+  min-height: 20px;
 }
