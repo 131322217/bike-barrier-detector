@@ -1,22 +1,52 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bike Barrier Detector</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-sA+3sQ7qNl4h6m+yp43plP6fD68Zt1PVg9oP8oE+QUM=" crossorigin=""/>
+
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 </head>
 <body>
-<div class="container">
-  <h1>加速度測定＆地図表示</h1>
-  <button id="startStopBtn">測定開始</button>
-  <div id="statusText">測定していません</div>
-  <div id="accelerationText">加速度合計: 0.00</div>
-  <div id="map"></div>
-</div>
+  <div class="container">
+    <h1>加速度測定 & Firestore 保存（イベント重視）</h1>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script type="module" src="script.js"></script>
+    <button id="startStopBtn">測定開始</button>
+    <div id="statusText">測定していません</div>
+
+    <div class="row">
+      <div>
+        <div class="label">加速度合計</div>
+        <div id="accTotal">0.00</div>
+      </div>
+      <div>
+        <div class="label">X</div>
+        <div id="accX">0.00</div>
+      </div>
+      <div>
+        <div class="label">Y</div>
+        <div id="accY">0.00</div>
+      </div>
+      <div>
+        <div class="label">Z</div>
+        <div id="accZ">0.00</div>
+      </div>
+    </div>
+
+    <div id="map" aria-hidden="false"></div>
+
+    <div id="logArea"></div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-o9N1j6w92rY+/8I35CJLiuXXRs0kGqXQoyX+JfXskMM=" crossorigin=""></script>
+
+  <!-- Main script (module) -->
+  <script type="module" src="script.js"></script>
 </body>
 </html>
