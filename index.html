@@ -2,31 +2,21 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>加速度 & GPS Recorder</title>
-
-  <!-- Leaflet -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bike Barrier Detector</title>
+  <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-  <style>
-    #map { width: 100%; height: 300px; margin-top: 10px; }
-    #log { white-space: pre-wrap; font-size: 14px; margin-top: 10px; }
-    button { padding: 12px; font-size: 16px; }
-  </style>
 </head>
-
 <body>
-<h2>加速度センサー位置記録</h2>
+<div class="container">
+  <h1>加速度測定＆地図表示</h1>
+  <button id="startStopBtn">測定開始</button>
+  <div id="statusText">測定していません</div>
+  <div id="accelerationText">加速度合計: 0.00</div>
+  <div id="map"></div>
+</div>
 
-<button id="startStopBtn">測定開始</button>
-<div id="statusText">待機中</div>
-<div id="accelerationText">加速度: -</div>
-
-<div id="map"></div>
-
-<div id="log"></div>
-
-<!-- Firebase -->
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script type="module" src="script.js"></script>
 </body>
 </html>

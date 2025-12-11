@@ -1,9 +1,7 @@
-/* -------------------------
-   Firebase
-------------------------- */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, deleteDoc, doc, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
+// Firebase初期化
 const firebaseConfig = {
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
@@ -12,178 +10,157 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-/* -------------------------
-   DOM
-------------------------- */
-const startStopBtn = document.getElementById("startStopBtn");
-const statusText = document.getElementById("statusText");
-const accelerationText = document.getElementById("accelerationText");
-const logBox = document.getElementById("log");
+// DOM
+const startStopBtn = document.getElementById('startStopBtn');
+const statusText = document.getElementById('statusText');
+const accelerationText = document.getElementById('accelerationText');
 
-function log(msg) {
-  console.log(msg);
-  logBox.textContent += msg + "\n";
-}
-
-/* -------------------------
-   状態管理
-------------------------- */
+// 測定フラグ
 let isMeasuring = false;
-let map, userMarker;
-let lastPosition = null;
+let prevAcc = null;
+const threshold = 0.5;
+let logTimer = null;
+
+// map変数
+let map;
+let userMarker;
 let watchId = null;
-let prevTotal = null;
-let currentSessionId = null;
 
-let lastSaveTime = 0;
-const normalSaveInterval = 1000; // 通常時は1秒に1回
-const diffThreshold = 3; // イベント判定
+let lastPosition = null;
+let logIds = []; // 通常ログのID保存用
 
-/* -------------------------
-   Map
-------------------------- */
+// 地図セットアップ
 function initMap(lat, lng) {
-  if (!map) {
-    map = L.map("map").setView([lat, lng], 17);
+  map = L.map('map').setView([lat, lng], 17);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap contributors"
-    }).addTo(map);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
 
-    userMarker = L.marker([lat, lng]).addTo(map);
-  } else {
-    userMarker.setLatLng([lat, lng]);
-    map.setView([lat, lng]);
-  }
+  userMarker = L.marker([lat, lng]).addTo(map);
 }
 
-/* -------------------------
-   Firestore 保存
-------------------------- */
-async function saveData(data) {
+// 位置更新
+function updateMap(lat, lng) {
+  if (!map) return initMap(lat, lng);
+  userMarker.setLatLng([lat, lng]);
+  map.setView([lat, lng]);
+}
+
+// Firestore保存（通常ログ）※8秒おき
+async function saveLog() {
+  if (!lastPosition) return;
   try {
-    await addDoc(collection(db, "accel_data"), data);
+    const ref = await addDoc(collection(db, "logs"), {
+      lat: lastPosition.latitude,
+      lng: lastPosition.longitude,
+      type: "log",
+      timestamp: new Date()
+    });
+    logIds.push(ref.id);
   } catch (e) {
-    console.error("保存失敗:", e);
+    console.error("通常ログ保存失敗", e);
   }
 }
 
-/* -------------------------
-   GPS
-------------------------- */
-function startGPS() {
-  watchId = navigator.geolocation.watchPosition(pos => {
-    lastPosition = pos.coords;
-    initMap(lastPosition.latitude, lastPosition.longitude);
-  }, err => {
-    log("GPSエラー: " + err.message);
-  }, { enableHighAccuracy: true });
-}
-
-function stopGPS() {
-  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-}
-
-/* -------------------------
-   加速度
-------------------------- */
-async function requestMotionPermission() {
-  if (typeof DeviceMotionEvent.requestPermission === "function") {
-    const resp = await DeviceMotionEvent.requestPermission();
-    if (resp !== "granted") {
-      alert("加速度センサーの許可がありません");
-      return false;
-    }
+// Firestore保存（イベント）
+async function saveEvent(data) {
+  try {
+    await addDoc(collection(db, "events"), data);
+    console.log("イベント保存成功", data);
+  } catch (e) {
+    console.error("イベント保存失敗", e);
   }
-  return true;
 }
 
+// 加速度処理
 function handleMotion(event) {
   if (!isMeasuring) return;
 
   const acc = event.acceleration;
   if (!acc || acc.x === null) return;
 
-  const x = acc.x, y = acc.y, z = acc.z;
-  const total = Math.abs(x) + Math.abs(y) + Math.abs(z);
-  const now = Date.now();
+  const total = Math.abs(acc.x) + Math.abs(acc.y) + Math.abs(acc.z);
+  accelerationText.textContent = `加速度合計: ${total.toFixed(2)}`;
 
-  accelerationText.textContent = `加速度: ${total.toFixed(2)}`;
-
-  if (!prevTotal) { prevTotal = total; return; }
-
-  const diff = Math.abs(total - prevTotal);
-  prevTotal = total;
-
-  if (!lastPosition) return;
-
-  const base = {
-    sessionId: currentSessionId,
-    time: Date.now(),
-    lat: lastPosition.latitude,
-    lng: lastPosition.longitude,
-    x, y, z,
-    total,
-    diff,
-    isEvent: diff > diffThreshold
-  };
-
-  if (base.isEvent) {
-    saveData(base);
-    log("イベント検出 diff=" + diff.toFixed(2));
-    L.marker([base.lat, base.lng], {
-      icon: L.icon({ iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/red-dot.png" })
-    }).addTo(map);
+  if (!prevAcc) {
+    prevAcc = total;
     return;
   }
 
-  if (now - lastSaveTime >= normalSaveInterval) {
-    lastSaveTime = now;
-    saveData(base);
+  const diff = Math.abs(total - prevAcc);
+  prevAcc = total;
+
+  if (diff > threshold && lastPosition) {
+    const data = {
+      lat: lastPosition.latitude,
+      lng: lastPosition.longitude,
+      diff: diff,
+      type: "event",
+      timestamp: new Date()
+    };
+
+    saveEvent(data);
+
+    // 地図に赤ピン
+    L.marker([data.lat, data.lng], {
+      icon: L.divIcon({
+        className: "red-pin",
+        html: "📍"
+      })
+    }).addTo(map);
   }
 }
 
-/* -------------------------
-   計測開始 / 停止
-------------------------- */
-async function startMeasurement() {
-  log("測定開始");
-  isMeasuring = true;
-  currentSessionId = "sess_" + Date.now();
-  prevTotal = null;
-  statusText.textContent = "測定中…";
-
-  const ok = await requestMotionPermission();
-  if (!ok) return;
-
-  startGPS();
-  window.addEventListener("devicemotion", handleMotion);
-
-  startStopBtn.textContent = "測定停止";
+// GPS追跡
+function trackPosition() {
+  watchId = navigator.geolocation.watchPosition(pos => {
+    lastPosition = pos.coords;
+    updateMap(lastPosition.latitude, lastPosition.longitude);
+  });
 }
 
-function stopMeasurement() {
-  log("測定停止");
-  isMeasuring = false;
-
-  stopGPS();
-  window.removeEventListener("devicemotion", handleMotion);
-
-  startStopBtn.textContent = "測定開始";
-  statusText.textContent = "停止中";
+// 通常ログ削除（測定終了時）
+async function deleteLogs() {
+  const snap = await getDocs(collection(db, "logs"));
+  for (const d of snap.docs) {
+    await deleteDoc(doc(db, "logs", d.id));
+  }
+  logIds = [];
 }
 
-/* -------------------------
-   ボタン
-------------------------- */
-startStopBtn.addEventListener("click", () => {
-  if (!isMeasuring) startMeasurement();
-  else stopMeasurement();
-});
+// ボタン操作
+startStopBtn.addEventListener('click', () => {
+  isMeasuring = !isMeasuring;
 
-/* -------------------------
-   初期位置を地図に反映
-------------------------- */
-navigator.geolocation.getCurrentPosition(pos => {
-  initMap(pos.coords.latitude, pos.coords.longitude);
+  if (isMeasuring) {
+    statusText.textContent = "測定中…";
+    prevAcc = null;
+
+    navigator.geolocation.getCurrentPosition(pos => {
+      lastPosition = pos.coords;
+      initMap(lastPosition.latitude, lastPosition.longitude);
+      trackPosition();
+    });
+
+    window.addEventListener('devicemotion', handleMotion);
+
+    // 8秒毎に通常ログ保存
+    logTimer = setInterval(saveLog, 8000);
+
+    startStopBtn.textContent = "測定終了";
+
+  } else {
+    statusText.textContent = "後処理中…";
+    startStopBtn.textContent = "測定開始";
+
+    window.removeEventListener('devicemotion', handleMotion);
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    if (logTimer !== null) clearInterval(logTimer);
+
+    // 通常ログ削除（後処理）→ 完了メッセージ表示
+    deleteLogs().then(() => {
+      statusText.textContent = "後処理完了！";
+    });
+  }
 });
