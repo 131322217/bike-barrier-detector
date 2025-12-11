@@ -29,10 +29,3 @@ body, html {
   margin-top: 10px;
   border-radius: 8px;
 }
-
-#resultText {
-  font-size: 1rem;
-  margin-top: 8px;
-  color: #333;
-  min-height: 20px;
-}
