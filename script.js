@@ -1,13 +1,13 @@
-// ================================
-// Bike Barrier Detector - stable
-// ================================
+// script.js
+// 仕様:
+// - 通常ログはローカル配列のみ（Firestoreに送らない）
+// - イベント検出(diff > THRESHOLD)でのみFirestore保存
+// - 前N件 + イベント本体を1ドキュメントとして保存
+// - イベントクールダウンあり（再判定抑制）
+// - 赤ピンはイベント開始位置のみ表示
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import {
-  getFirestore,
-  collection,
-  addDoc
-} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
 /* ===== Firebase ===== */
 const firebaseConfig = {
@@ -25,135 +25,127 @@ const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
 /* ===== 設定 ===== */
-const THRESHOLD = 2.5;       // イベント判定
-const QUIET_COUNT = 3;      // 揺れが収まった判定回数
+const THRESHOLD = 2.5;           // イベント判定しきい値
+const PRE_N = 3;                 // 前N件
+const EVENT_COOLDOWN_MS = 1200;  // 再判定抑制時間(ms)
 
 /* ===== 状態 ===== */
 let isMeasuring = false;
 let sessionId = null;
-
-let prevTotal = null;
 let lastPosition = null;
-let watchId = null;
+let prevTotal = null;
+let lastEventTime = 0;
 
+let watchId = null;
 let map = null;
 let userMarker = null;
 
-// ローカル保存用
-let localLogs = [];
-let inEvent = false;
-let quietCounter = 0;
+// ローカル保存
+let buffer = [];        // 通常ログ
+let eventBuffer = null; // 現在のイベント
 
-/* ===== UIログ ===== */
+/* ===== UI ===== */
 function logUI(msg) {
-  resultText.textContent = msg;
+  if (resultText) resultText.textContent = msg;
 }
 
-/* ===== iOS 加速度 許可 ===== */
-async function requestMotionPermission() {
-  if (
-    typeof DeviceMotionEvent !== "undefined" &&
-    typeof DeviceMotionEvent.requestPermission === "function"
-  ) {
+/* ===== Map ===== */
+function initMap(lat, lng) {
+  if (map) return;
+  map = L.map("map").setView([lat, lng], 17);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap contributors"
+  }).addTo(map);
+  userMarker = L.marker([lat, lng]).addTo(map);
+}
+
+function updateMap(lat, lng) {
+  if (!map) initMap(lat, lng);
+  userMarker.setLatLng([lat, lng]);
+}
+
+function addEventPin(lat, lng, diff) {
+  const pinIcon = L.divIcon({
+    className: "red-pin",
+    html: "📍",
+    iconSize: [16, 16],
+    iconAnchor: [8, 16]
+  });
+  L.marker([lat, lng], { icon: pinIcon })
+    .addTo(map)
+    .bindPopup(`Event diff=${diff.toFixed(2)}`);
+}
+
+/* ===== Firestore ===== */
+async function saveEventDocument(eventData) {
+  await addDoc(collection(db, "events"), eventData);
+}
+
+/* ===== Permission (iOS) ===== */
+async function requestMotionPermissionIfNeeded() {
+  if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
     const res = await DeviceMotionEvent.requestPermission();
     return res === "granted";
   }
   return true;
 }
 
-/* ===== 地図 ===== */
-function initMap(lat, lng) {
-  if (map) return;
-  map = L.map("map").setView([lat, lng], 17);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap"
-  }).addTo(map);
-  userMarker = L.marker([lat, lng]).addTo(map);
-}
-function updateMap(lat, lng) {
-  if (!map) initMap(lat, lng);
-  userMarker.setLatLng([lat, lng]);
-}
-
-/* ===== Firestore 保存 ===== */
-async function saveEventBlock(logs) {
-  if (logs.length === 0) return;
-
-  await addDoc(collection(db, "events"), {
-    sessionId,
-    createdAt: new Date().toISOString(),
-    logs
-  });
-
-  logUI(`Firestore保存完了（${logs.length}件）`);
-}
-
-/* ===== 加速度処理 ===== */
+/* ===== Motion ===== */
 function handleMotion(e) {
   if (!isMeasuring) return;
 
-  const acc = e.acceleration;
-  if (!acc || acc.x == null) return;
+  const acc = e.acceleration && e.acceleration.x !== null
+    ? e.acceleration
+    : e.accelerationIncludingGravity;
+  if (!acc) return;
 
-  const x = acc.x;
-  const y = acc.y;
-  const z = acc.z;
+  const x = acc.x ?? 0;
+  const y = acc.y ?? 0;
+  const z = acc.z ?? 0;
   const total = Math.abs(x) + Math.abs(y) + Math.abs(z);
 
   let diff = 0;
   if (prevTotal !== null) diff = Math.abs(total - prevTotal);
   prevTotal = total;
 
-  accelerationText.textContent =
-    `total: ${total.toFixed(2)} diff: ${diff.toFixed(2)}`;
-
-  const log = {
+  const sample = {
     x, y, z, total, diff,
     lat: lastPosition?.latitude ?? null,
     lng: lastPosition?.longitude ?? null,
     timestamp: new Date().toISOString(),
-    isEvent: diff > THRESHOLD
+    isEvent: false
   };
 
-  // イベント検出
-  if (diff > THRESHOLD) {
-    quietCounter = 0;
+  accelerationText.textContent = `加速度: ${total.toFixed(2)} (diff ${diff.toFixed(2)})`;
 
-    if (!inEvent) {
-      inEvent = true;
-      localLogs = [];
+  // 通常はバッファに積む
+  buffer.push(sample);
+  if (buffer.length > 20) buffer.shift();
 
-      // ピン表示（最初のイベントのみ）
-      if (log.lat && log.lng) {
-        const pin = L.divIcon({
-          className: "red-pin",
-          html: "📍",
-          iconSize: [16, 16],
-          iconAnchor: [8, 16]
-        });
-        L.marker([log.lat, log.lng], { icon: pin }).addTo(map);
-      }
+  const now = Date.now();
 
-      logUI("イベント開始");
+  // イベント判定
+  if (diff > THRESHOLD && now - lastEventTime > EVENT_COOLDOWN_MS) {
+    lastEventTime = now;
+
+    const context = buffer.slice(-PRE_N);
+    eventBuffer = {
+      sessionId,
+      createdAt: new Date().toISOString(),
+      logs: [
+        ...context.map(s => ({ ...s, isEvent: false })),
+        { ...sample, isEvent: true }
+      ]
+    };
+
+    logUI("イベント検出 → 保存");
+
+    if (sample.lat && sample.lng) {
+      initMap(sample.lat, sample.lng);
+      addEventPin(sample.lat, sample.lng, diff);
     }
 
-    localLogs.push(log);
-    return;
-  }
-
-  // イベント中でなければ無視
-  if (!inEvent) return;
-
-  // 揺れが落ち着いたか判定
-  quietCounter++;
-  localLogs.push(log);
-
-  if (quietCounter >= QUIET_COUNT) {
-    // イベント終了
-    saveEventBlock(localLogs);
-    inEvent = false;
-    quietCounter = 0;
-    localLogs = [];
+    saveEventDocument(eventBuffer);
   }
 }
 
@@ -161,38 +153,33 @@ function handleMotion(e) {
 function startGPS() {
   watchId = navigator.geolocation.watchPosition(pos => {
     lastPosition = pos.coords;
-    updateMap(lastPosition.latitude, lastPosition.longitude);
-  });
+    updateMap(pos.coords.latitude, pos.coords.longitude);
+  }, console.warn, { enableHighAccuracy: true });
 }
+
 function stopGPS() {
   if (watchId) navigator.geolocation.clearWatch(watchId);
   watchId = null;
 }
 
-/* ===== セッションID ===== */
+/* ===== Session ===== */
 function makeSessionId() {
   return new Date().toISOString();
 }
 
-/* ===== ボタン ===== */
+/* ===== Start / Stop ===== */
 startStopBtn.addEventListener("click", async () => {
   if (!isMeasuring) {
-    const ok = await requestMotionPermission();
-    if (!ok) {
-      alert("加速度センサーの許可が必要です");
-      return;
-    }
+    const ok = await requestMotionPermissionIfNeeded();
+    if (!ok) return alert("加速度の許可が必要です");
 
     isMeasuring = true;
     sessionId = makeSessionId();
+    buffer = [];
     prevTotal = null;
-    localLogs = [];
-    inEvent = false;
-    quietCounter = 0;
 
-    startStopBtn.textContent = "測定終了";
     statusText.textContent = "測定中…";
-    logUI("測定開始");
+    startStopBtn.textContent = "測定終了";
 
     navigator.geolocation.getCurrentPosition(pos => {
       lastPosition = pos.coords;
@@ -204,12 +191,11 @@ startStopBtn.addEventListener("click", async () => {
 
   } else {
     isMeasuring = false;
+    startStopBtn.textContent = "測定開始";
+    statusText.textContent = "後処理完了";
+    logUI("測定終了");
 
     window.removeEventListener("devicemotion", handleMotion);
     stopGPS();
-
-    startStopBtn.textContent = "測定開始";
-    statusText.textContent = "測定終了";
-    logUI("測定終了");
   }
 });
