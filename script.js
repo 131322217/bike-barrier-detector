@@ -1,10 +1,4 @@
 // script.js
-// 仕様:
-// - 通常ログはローカル配列のみ（Firestoreに送らない）
-// - イベント検出(diff > THRESHOLD)でのみFirestore保存
-// - 前N件 + イベント本体を1ドキュメントとして保存
-// - イベントクールダウンあり（再判定抑制）
-// - 赤ピンはイベント開始位置のみ表示
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
@@ -25,24 +19,26 @@ const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
 /* ===== 設定 ===== */
-const THRESHOLD = 2.5;           // イベント判定しきい値
-const PRE_N = 3;                 // 前N件
-const EVENT_COOLDOWN_MS = 1200;  // 再判定抑制時間(ms)
+const THRESHOLD = 2.5;
+
+const ROUGH_START_MS = 1200;
+const ROUGH_END_MS   = 1000;
+const STEP_MAX_MS    = 900;
 
 /* ===== 状態 ===== */
 let isMeasuring = false;
 let sessionId = null;
+
 let lastPosition = null;
 let prevTotal = null;
-let lastEventTime = 0;
 
-let watchId = null;
+let roughStartTime = null;
+let lastEventTime = null;
+let roughLogs = [];
+
 let map = null;
 let userMarker = null;
-
-// ローカル保存
-let buffer = [];        // 通常ログ
-let eventBuffer = null; // 現在のイベント
+let watchId = null;
 
 /* ===== UI ===== */
 function logUI(msg) {
@@ -64,26 +60,40 @@ function updateMap(lat, lng) {
   userMarker.setLatLng([lat, lng]);
 }
 
-function addEventPin(lat, lng, diff) {
-  const pinIcon = L.divIcon({
-    className: "red-pin",
-    html: "📍",
-    iconSize: [16, 16],
-    iconAnchor: [8, 16]
+/* ===== ピン（サイズだけ diff 依存） ===== */
+function addPin(lat, lng, color, label, diff) {
+  let size = 14;
+  if (diff >= 7.0) size = 22;
+  else if (diff >= 4.0) size = 18;
+
+  const icon = L.divIcon({
+    className: "pin",
+    html: `<span style="font-size:${size}px;color:${color}">📍</span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size]
   });
-  L.marker([lat, lng], { icon: pinIcon })
+
+  L.marker([lat, lng], { icon })
     .addTo(map)
-    .bindPopup(`Event diff=${diff.toFixed(2)}`);
+    .bindPopup(`${label}<br>diff=${diff.toFixed(2)}`);
 }
 
 /* ===== Firestore ===== */
-async function saveEventDocument(eventData) {
-  await addDoc(collection(db, "events"), eventData);
+async function saveEvent(type, logs) {
+  await addDoc(collection(db, "events"), {
+    sessionId,
+    type,
+    createdAt: new Date().toISOString(),
+    logs
+  });
 }
 
-/* ===== Permission (iOS) ===== */
+/* ===== iOS permission ===== */
 async function requestMotionPermissionIfNeeded() {
-  if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+  if (
+    typeof DeviceMotionEvent !== "undefined" &&
+    typeof DeviceMotionEvent.requestPermission === "function"
+  ) {
     const res = await DeviceMotionEvent.requestPermission();
     return res === "granted";
   }
@@ -108,53 +118,81 @@ function handleMotion(e) {
   if (prevTotal !== null) diff = Math.abs(total - prevTotal);
   prevTotal = total;
 
+  const now = Date.now();
+
   const sample = {
     x, y, z, total, diff,
     lat: lastPosition?.latitude ?? null,
     lng: lastPosition?.longitude ?? null,
     timestamp: new Date().toISOString(),
-    isEvent: false
+    isEvent: diff > THRESHOLD
   };
 
-  accelerationText.textContent = `加速度: ${total.toFixed(2)} (diff ${diff.toFixed(2)})`;
+  accelerationText.textContent =
+    `total=${total.toFixed(2)} diff=${diff.toFixed(2)}`;
 
-  // 通常はバッファに積む
-  buffer.push(sample);
-  if (buffer.length > 20) buffer.shift();
+  // イベント検出
+  if (diff > THRESHOLD) {
+    if (!roughStartTime) {
+      roughStartTime = now;
+      logUI("ガタガタ開始");
 
-  const now = Date.now();
-
-  // イベント判定
-  if (diff > THRESHOLD && now - lastEventTime > EVENT_COOLDOWN_MS) {
-    lastEventTime = now;
-
-    const context = buffer.slice(-PRE_N);
-    eventBuffer = {
-      sessionId,
-      createdAt: new Date().toISOString(),
-      logs: [
-        ...context.map(s => ({ ...s, isEvent: false })),
-        { ...sample, isEvent: true }
-      ]
-    };
-
-    logUI("イベント検出 → 保存");
-
-    if (sample.lat && sample.lng) {
-      initMap(sample.lat, sample.lng);
-      addEventPin(sample.lat, sample.lng, diff);
+      if (sample.lat && sample.lng) {
+        initMap(sample.lat, sample.lng);
+        addPin(sample.lat, sample.lng, "red", "でこぼこ道 開始", diff);
+      }
     }
 
-    saveEventDocument(eventBuffer);
+    lastEventTime = now;
+    roughLogs.push(sample);
+    return;
+  }
+
+  // ガタガタ終了判定
+  if (roughStartTime && now - lastEventTime > ROUGH_END_MS) {
+    const duration = lastEventTime - roughStartTime;
+
+    if (duration <= STEP_MAX_MS) {
+      logUI("段差と判定");
+
+      if (roughLogs[0]?.lat && roughLogs[0]?.lng) {
+        addPin(
+          roughLogs[0].lat,
+          roughLogs[0].lng,
+          "green",
+          "段差",
+          roughLogs[0].diff
+        );
+      }
+
+      saveEvent("step", roughLogs);
+    } else {
+      logUI("でこぼこ道終了");
+
+      const last = roughLogs[roughLogs.length - 1];
+      if (last?.lat && last?.lng) {
+        addPin(last.lat, last.lng, "blue", "でこぼこ道 終了", last.diff);
+      }
+
+      saveEvent("rough", roughLogs);
+    }
+
+    roughLogs = [];
+    roughStartTime = null;
+    lastEventTime = null;
   }
 }
 
 /* ===== GPS ===== */
 function startGPS() {
-  watchId = navigator.geolocation.watchPosition(pos => {
-    lastPosition = pos.coords;
-    updateMap(pos.coords.latitude, pos.coords.longitude);
-  }, console.warn, { enableHighAccuracy: true });
+  watchId = navigator.geolocation.watchPosition(
+    pos => {
+      lastPosition = pos.coords;
+      updateMap(pos.coords.latitude, pos.coords.longitude);
+    },
+    console.warn,
+    { enableHighAccuracy: true }
+  );
 }
 
 function stopGPS() {
@@ -175,11 +213,13 @@ startStopBtn.addEventListener("click", async () => {
 
     isMeasuring = true;
     sessionId = makeSessionId();
-    buffer = [];
     prevTotal = null;
+    roughLogs = [];
+    roughStartTime = null;
 
-    statusText.textContent = "測定中…";
     startStopBtn.textContent = "測定終了";
+    statusText.textContent = "測定中…";
+    logUI("測定開始");
 
     navigator.geolocation.getCurrentPosition(pos => {
       lastPosition = pos.coords;
@@ -188,9 +228,9 @@ startStopBtn.addEventListener("click", async () => {
     });
 
     window.addEventListener("devicemotion", handleMotion);
-
   } else {
     isMeasuring = false;
+
     startStopBtn.textContent = "測定開始";
     statusText.textContent = "後処理完了";
     logUI("測定終了");
