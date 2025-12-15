@@ -1,4 +1,12 @@
 // script.js
+// 仕様:
+// - 通常ログはローカルのみ
+// - diff > THRESHOLD の瞬間を「段差イベント」として検出
+// - イベント時のみ Firestore に保存
+// - イベント時のみ地図にピン表示
+// - diff の大きさでピンサイズを変更
+// - iOS の加速度許可対応
+// - UIログを画面下に表示
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
@@ -19,33 +27,32 @@ const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
 /* ===== 設定 ===== */
-const THRESHOLD = 2.5;
-
-const ROUGH_START_MS = 1200;
-const ROUGH_END_MS   = 1000;
-const STEP_MAX_MS    = 900;
+const THRESHOLD = 2.5;            // 段差判定
+const EVENT_COOLDOWN_MS = 1200;   // 再判定抑制
+const PRE_N = 2;                  // 前データ件数
 
 /* ===== 状態 ===== */
 let isMeasuring = false;
 let sessionId = null;
-
 let lastPosition = null;
 let prevTotal = null;
+let lastEventTime = 0;
 
-let roughStartTime = null;
-let lastEventTime = null;
-let roughLogs = [];
-
+let watchId = null;
 let map = null;
 let userMarker = null;
-let watchId = null;
 
-/* ===== UI ===== */
+// ローカルバッファ
+let buffer = [];
+
+/* ===== UIログ ===== */
 function logUI(msg) {
-  if (resultText) resultText.textContent = msg;
+  if (resultText) {
+    resultText.textContent = msg;
+  }
 }
 
-/* ===== Map ===== */
+/* ===== 地図 ===== */
 function initMap(lat, lng) {
   if (map) return;
   map = L.map("map").setView([lat, lng], 17);
@@ -60,35 +67,40 @@ function updateMap(lat, lng) {
   userMarker.setLatLng([lat, lng]);
 }
 
-/* ===== ピン（サイズだけ diff 依存） ===== */
-function addPin(lat, lng, color, label, diff) {
-  let size = 14;
-  if (diff >= 7.0) size = 22;
-  else if (diff >= 4.0) size = 18;
+/* ===== diff に応じたピンサイズ ===== */
+function getPinSize(diff) {
+  if (diff < 4.0) return 14;   // 小
+  if (diff < 8.0) return 20;   // 中
+  return 28;                   // 大
+}
 
-  const icon = L.divIcon({
-    className: "pin",
-    html: `<span style="font-size:${size}px;color:${color}">📍</span>`,
+function addEventPin(lat, lng, diff) {
+  const size = getPinSize(diff);
+
+  const pinIcon = L.divIcon({
+    className: "event-pin",
+    html: "📍",
     iconSize: [size, size],
-    iconAnchor: [size / 2, size]
+    iconAnchor: [size / 2, size],
   });
 
-  L.marker([lat, lng], { icon })
+  L.marker([lat, lng], { icon: pinIcon })
     .addTo(map)
-    .bindPopup(`${label}<br>diff=${diff.toFixed(2)}`);
+    .bindPopup(`段差検出<br>diff = ${diff.toFixed(2)}`);
 }
 
 /* ===== Firestore ===== */
-async function saveEvent(type, logs) {
-  await addDoc(collection(db, "events"), {
-    sessionId,
-    type,
-    createdAt: new Date().toISOString(),
-    logs
-  });
+async function saveEvent(eventData) {
+  try {
+    await addDoc(collection(db, "events"), eventData);
+    logUI("Firestore にイベント保存");
+  } catch (e) {
+    console.error(e);
+    logUI("Firestore 保存失敗");
+  }
 }
 
-/* ===== iOS permission ===== */
+/* ===== iOS 加速度許可 ===== */
 async function requestMotionPermissionIfNeeded() {
   if (
     typeof DeviceMotionEvent !== "undefined" &&
@@ -100,13 +112,14 @@ async function requestMotionPermissionIfNeeded() {
   return true;
 }
 
-/* ===== Motion ===== */
+/* ===== 加速度処理 ===== */
 function handleMotion(e) {
   if (!isMeasuring) return;
 
-  const acc = e.acceleration && e.acceleration.x !== null
-    ? e.acceleration
-    : e.accelerationIncludingGravity;
+  const acc =
+    e.acceleration && e.acceleration.x !== null
+      ? e.acceleration
+      : e.accelerationIncludingGravity;
   if (!acc) return;
 
   const x = acc.x ?? 0;
@@ -118,68 +131,45 @@ function handleMotion(e) {
   if (prevTotal !== null) diff = Math.abs(total - prevTotal);
   prevTotal = total;
 
-  const now = Date.now();
+  accelerationText.textContent =
+    `total=${total.toFixed(2)} diff=${diff.toFixed(2)}`;
 
   const sample = {
     x, y, z, total, diff,
     lat: lastPosition?.latitude ?? null,
     lng: lastPosition?.longitude ?? null,
     timestamp: new Date().toISOString(),
-    isEvent: diff > THRESHOLD
+    isEvent: false
   };
 
-  accelerationText.textContent =
-    `total=${total.toFixed(2)} diff=${diff.toFixed(2)}`;
+  buffer.push(sample);
+  if (buffer.length > 10) buffer.shift();
 
-  // イベント検出
-  if (diff > THRESHOLD) {
-    if (!roughStartTime) {
-      roughStartTime = now;
-      logUI("ガタガタ開始");
+  const now = Date.now();
 
-      if (sample.lat && sample.lng) {
-        initMap(sample.lat, sample.lng);
-        addPin(sample.lat, sample.lng, "red", "でこぼこ道 開始", diff);
-      }
-    }
-
+  // 段差イベント判定
+  if (diff > THRESHOLD && now - lastEventTime > EVENT_COOLDOWN_MS) {
     lastEventTime = now;
-    roughLogs.push(sample);
-    return;
-  }
 
-  // ガタガタ終了判定
-  if (roughStartTime && now - lastEventTime > ROUGH_END_MS) {
-    const duration = lastEventTime - roughStartTime;
+    const logs = [
+      ...buffer.slice(-PRE_N).map(s => ({ ...s, isEvent: false })),
+      { ...sample, isEvent: true }
+    ];
 
-    if (duration <= STEP_MAX_MS) {
-      logUI("段差と判定");
+    const eventDoc = {
+      sessionId,
+      createdAt: new Date().toISOString(),
+      logs
+    };
 
-      if (roughLogs[0]?.lat && roughLogs[0]?.lng) {
-        addPin(
-          roughLogs[0].lat,
-          roughLogs[0].lng,
-          "green",
-          "段差",
-          roughLogs[0].diff
-        );
-      }
+    logUI("段差イベント検出");
 
-      saveEvent("step", roughLogs);
-    } else {
-      logUI("でこぼこ道終了");
-
-      const last = roughLogs[roughLogs.length - 1];
-      if (last?.lat && last?.lng) {
-        addPin(last.lat, last.lng, "blue", "でこぼこ道 終了", last.diff);
-      }
-
-      saveEvent("rough", roughLogs);
+    if (sample.lat && sample.lng) {
+      initMap(sample.lat, sample.lng);
+      addEventPin(sample.lat, sample.lng, diff);
     }
 
-    roughLogs = [];
-    roughStartTime = null;
-    lastEventTime = null;
+    saveEvent(eventDoc);
   }
 }
 
@@ -190,7 +180,7 @@ function startGPS() {
       lastPosition = pos.coords;
       updateMap(pos.coords.latitude, pos.coords.longitude);
     },
-    console.warn,
+    err => console.warn(err),
     { enableHighAccuracy: true }
   );
 }
@@ -200,7 +190,7 @@ function stopGPS() {
   watchId = null;
 }
 
-/* ===== Session ===== */
+/* ===== セッション ===== */
 function makeSessionId() {
   return new Date().toISOString();
 }
@@ -209,17 +199,18 @@ function makeSessionId() {
 startStopBtn.addEventListener("click", async () => {
   if (!isMeasuring) {
     const ok = await requestMotionPermissionIfNeeded();
-    if (!ok) return alert("加速度の許可が必要です");
+    if (!ok) {
+      alert("加速度センサの許可が必要です");
+      return;
+    }
 
     isMeasuring = true;
     sessionId = makeSessionId();
+    buffer = [];
     prevTotal = null;
-    roughLogs = [];
-    roughStartTime = null;
 
-    startStopBtn.textContent = "測定終了";
     statusText.textContent = "測定中…";
-    logUI("測定開始");
+    startStopBtn.textContent = "測定終了";
 
     navigator.geolocation.getCurrentPosition(pos => {
       lastPosition = pos.coords;
@@ -228,9 +219,9 @@ startStopBtn.addEventListener("click", async () => {
     });
 
     window.addEventListener("devicemotion", handleMotion);
+
   } else {
     isMeasuring = false;
-
     startStopBtn.textContent = "測定開始";
     statusText.textContent = "後処理完了";
     logUI("測定終了");
