@@ -1,236 +1,141 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+/**********************
+ * 設定値
+ **********************/
+const THRESHOLD = 4.5;              // 段差判定閾値
+const EVENT_COOLDOWN_MS = 800;      // 連続検出防止
+const IGNORE_AFTER_START_MS = 3000; // 開始後3秒無視
+const IGNORE_BEFORE_END_MS = 3000;  // 終了前3秒無視
 
-/* ===== Firebase 設定 ===== */
-const firebaseConfig = {
-  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
-  authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
-  projectId: "bike-barrier-detector-1e128"
-};
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+/**********************
+ * 状態管理
+ **********************/
+let lastAccel = null;
+let lastEventTime = 0;
 
-/* ===== DOM ===== */
-const startStopBtn = document.getElementById("startStopBtn");
-const statusText = document.getElementById("statusText");
-const accelerationText = document.getElementById("accelerationText");
-const resultText = document.getElementById("resultText");
-
-/* ===== 設定 ===== */
-const THRESHOLD = 1.0;   // diff > THRESHOLD => event
-const PRE_N = 3;         // 前3件補助データ
-const PERIODIC_MS = 1000;
-
-/* ===== 状態 ===== */
+let measurementStartTime = 0;
+let measurementEndTime = 0;
 let isMeasuring = false;
-let sessionId = null;
-let watchId = null;
-let map = null;
-let userMarker = null;
-let lastPosition = null;
-let prevTotal = null;
-let sampleCounter = 0;
-let recentSamples = [];
-let periodicTimer = null;
 
-/* ===== ヘルパー ===== */
-function logUI(msg){
-  if(resultText) resultText.textContent = msg;
-  console.log(msg);
-}
+let currentLat = null;
+let currentLng = null;
 
-function initMap(lat,lng){
-  if(!map){
-    map = L.map("map").setView([lat,lng],17);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution:"© OpenStreetMap contributors"
-    }).addTo(map);
-    userMarker = L.marker([lat,lng]).addTo(map);
-  }
-}
+/**********************
+ * Leaflet 初期化
+ **********************/
+const map = L.map("map").setView([35.9435, 139.7070], 16);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19
+}).addTo(map);
 
-function updateMap(lat,lng){
-  if(!map) return initMap(lat,lng);
-  userMarker.setLatLng([lat,lng]);
-  map.setView([lat,lng]);
-}
-
-async function saveSampleToFirestore(samples){
-  // samples: 配列 of { x,y,z,total,diff,lat,lng,timestamp }
-  const batchDoc = {
-    sessionId,
-    timestamp: new Date().toISOString(),
-    logs: samples.map(s=>({
-      x: s.x,
-      y: s.y,
-      z: s.z,
-      total: s.total,
-      diff: s.diff,
-      lat: s.lat,
-      lng: s.lng,
-      isEvent: s.isEvent || false,
-      isContext: s.isContext || false
-    }))
-  };
-  try{
-    await addDoc(collection(db,"raw_sessions"), batchDoc);
-    logUI(`Firestore 保存: ${samples.length} 件`);
-  } catch(e){
-    console.error("Firestore 保存失敗", e);
-  }
-}
-
-/* ===== データ管理 ===== */
-function pushRecentSample(sample){
-  recentSamples.push(sample);
-  if(recentSamples.length>100) recentSamples.shift();
-}
-
-function getLastNSamples(n){
-  return recentSamples.slice(-n);
-}
-
-/* ===== Permission (iOS) ===== */
-async function requestMotionPermissionIfNeeded(){
-  if(typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function"){
-    try{
-      const resp = await DeviceMotionEvent.requestPermission();
-      return resp==="granted";
-    } catch(e){
-      console.warn("DeviceMotion permission error:", e);
-      return false;
-    }
-  }
-  return true;
-}
-
-/* ===== devicemotion handler ===== */
-function handleMotion(event){
-  if(!isMeasuring) return;
-
-  const accObj = event.acceleration && event.acceleration.x !== null ? event.acceleration : (event.accelerationIncludingGravity || null);
-  if(!accObj) return;
-
-  const x = accObj.x ?? 0;
-  const y = accObj.y ?? 0;
-  const z = accObj.z ?? 0;
-  const total = Math.abs(x)+Math.abs(y)+Math.abs(z);
-  const diff = prevTotal!==null?Math.abs(total-prevTotal):0;
-  prevTotal = total;
-
-  const sample = {
-    id: sampleCounter++,
-    x,y,z,total,diff,
-    lat:lastPosition?lastPosition.latitude:null,
-    lng:lastPosition?lastPosition.longitude:null,
-    timestamp:new Date(),
-    isEvent:false,
-    isContext:false
-  };
-
-  accelerationText.textContent = `加速度合計: ${total.toFixed(2)} (diff: ${diff.toFixed(2)})`;
-  pushRecentSample(sample);
-
-  if(diff>THRESHOLD){
-    logUI(`イベント検出 diff=${diff.toFixed(2)}`);
-
-    // 前N件取得
-    const preSamples = getLastNSamples(PRE_N);
-    preSamples.forEach(s=>s.isContext=true);
-
-    sample.isEvent=true;
-
-    // 保存まとめ
-    saveSampleToFirestore([...preSamples,sample]);
-
-    // 小さめ赤ピン
-    if(sample.lat!==null && sample.lng!==null){
-      try{
-        if(!map) initMap(sample.lat,sample.lng);
-        const pinIcon = L.divIcon({
-          className:"red-pin",
-          html:"📍",
-          iconSize:[16,16],
-          iconAnchor:[8,16]
-        });
-        L.marker([sample.lat,sample.lng],{icon:pinIcon})
-          .addTo(map)
-          .bindPopup(`Event: ${diff.toFixed(2)}`);
-      } catch(e){
-        console.warn("map marker error:", e);
-      }
-    }
-  }
-}
-
-/* ===== GPS tracking ===== */
-function startTrackingPosition(){
-  if(!navigator.geolocation){ logUI("位置情報が利用できません"); return; }
-  watchId = navigator.geolocation.watchPosition(
-    pos=>{
-      lastPosition = pos.coords;
-      if(!map) initMap(lastPosition.latitude,lastPosition.longitude);
-      updateMap(lastPosition.latitude,lastPosition.longitude);
-      statusText.textContent = `測定中… 位置あり (${lastPosition.latitude.toFixed(5)},${lastPosition.longitude.toFixed(5)})`;
-    },
-    err=>{
-      console.warn("位置情報エラー",err);
-      logUI("位置取得エラー: "+(err.message||err.code));
-    },
-    {enableHighAccuracy:true,maximumAge:2000,timeout:10000}
-  );
-}
-
-function stopTrackingPosition(){
-  if(watchId!==null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
-}
-
-/* ===== Session ID ===== */
-function makeSessionId(){
-  return new Date().toISOString().replace(/[:.]/g,"-");
-}
-
-/* ===== Start/Stop measurement ===== */
-startStopBtn.addEventListener("click",async ()=>{
-  if(!isMeasuring){
-    const motionOK = await requestMotionPermissionIfNeeded();
-    if(!motionOK){ alert("加速度センサーの権限が必要です"); return; }
-
-    sessionId = makeSessionId();
-    logUI("セッション開始: "+sessionId);
-
-    recentSamples=[];
-    prevTotal=null;
-    sampleCounter=0;
-
-    isMeasuring=true;
-    startStopBtn.textContent="測定終了";
-    statusText.textContent="測定中…";
-
-    navigator.geolocation.getCurrentPosition(
-      pos=>{
-        lastPosition=pos.coords;
-        initMap(lastPosition.latitude,lastPosition.longitude);
-        startTrackingPosition();
-      },
-      err=>{
-        console.warn("getCurrentPosition failed",err);
-        startTrackingPosition();
-      },
-      {enableHighAccuracy:true,timeout:5000}
-    );
-
-    window.addEventListener("devicemotion",handleMotion);
+/**********************
+ * センサー許可（iOS）
+ **********************/
+document.getElementById("permissionBtn").addEventListener("click", async () => {
+  if (
+    typeof DeviceMotionEvent !== "undefined" &&
+    typeof DeviceMotionEvent.requestPermission === "function"
+  ) {
+    const res = await DeviceMotionEvent.requestPermission();
+    alert(res === "granted" ? "許可されました" : "拒否されました");
   } else {
-    isMeasuring=false;
-    startStopBtn.textContent="測定開始";
-    statusText.textContent="測定停止 → 後処理中...";
+    alert("この端末では許可不要です");
+  }
+});
 
-    window.removeEventListener("devicemotion",handleMotion);
-    stopTrackingPosition();
+/**********************
+ * 計測開始
+ **********************/
+document.getElementById("startBtn").addEventListener("click", () => {
+  measurementStartTime = Date.now();
+  measurementEndTime = 0;
+  isMeasuring = true;
+  lastAccel = null;
+  lastEventTime = 0;
 
-    // 未保存のサンプルは捨てる（イベントのみ保存なので）
-    logUI("後処理完了");
-    statusText.textContent="後処理完了";
+  document.getElementById("status").textContent = "計測中…";
+});
+
+/**********************
+ * 計測終了
+ **********************/
+document.getElementById("stopBtn").addEventListener("click", () => {
+  measurementEndTime = Date.now();
+  isMeasuring = false;
+
+  document.getElementById("status").textContent = "計測終了";
+});
+
+/**********************
+ * 無視時間判定
+ **********************/
+function isInIgnoreTime(now) {
+  // 開始直後
+  if (now - measurementStartTime < IGNORE_AFTER_START_MS) {
+    return true;
+  }
+
+  // 終了直前
+  if (
+    measurementEndTime !== 0 &&
+    measurementEndTime - now < IGNORE_BEFORE_END_MS
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**********************
+ * 位置情報取得
+ **********************/
+navigator.geolocation.watchPosition(
+  (pos) => {
+    currentLat = pos.coords.latitude;
+    currentLng = pos.coords.longitude;
+  },
+  (err) => console.error(err),
+  { enableHighAccuracy: true }
+);
+
+/**********************
+ * 加速度処理
+ **********************/
+window.addEventListener("devicemotion", (event) => {
+  if (!isMeasuring) return;
+  if (!event.accelerationIncludingGravity) return;
+
+  const now = Date.now();
+
+  const x = event.accelerationIncludingGravity.x ?? 0;
+  const y = event.accelerationIncludingGravity.y ?? 0;
+  const z = event.accelerationIncludingGravity.z ?? 0;
+
+  const total = Math.sqrt(x * x + y * y + z * z);
+
+  if (lastAccel === null) {
+    lastAccel = total;
+    return;
+  }
+
+  const diff = Math.abs(total - lastAccel);
+  lastAccel = total;
+
+  // 段差判定
+  if (
+    diff > THRESHOLD &&
+    now - lastEventTime > EVENT_COOLDOWN_MS &&
+    !isInIgnoreTime(now) &&
+    currentLat !== null
+  ) {
+    lastEventTime = now;
+
+    L.circleMarker([currentLat, currentLng], {
+      radius: 6,
+      fillOpacity: 0.8
+    })
+      .addTo(map)
+      .bindPopup(`diff: ${diff.toFixed(2)}`);
+
+    console.log("段差検出", diff);
   }
 });
