@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>段差マップ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .legend {
+      background: white;
+      padding: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .pin-low { color: green; }
+    .pin-mid { color: orange; }
+    .pin-high { color: red; }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+/* ===== Firebase ===== */
+const firebaseConfig = {
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
+  projectId: "bike-barrier-detector-1e128"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+/* ===== 設定 ===== */
+const GROUP_DISTANCE_M = 5;
+
+/* ===== 地図 ===== */
+const map = L.map("map").setView([35.681236, 139.767125], 15);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "© OpenStreetMap contributors"
+}).addTo(map);
+
+/* ===== Utility ===== */
+function distanceMeters(lat1,lng1,lat2,lng2){
+  const R = 6371000;
+  const dLat = (lat2-lat1)*Math.PI/180;
+  const dLng = (lng2-lng1)*Math.PI/180;
+  const a =
+    Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180) *
+    Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+/* ===== 色決定 ===== */
+function getColorByCount(count){
+  if(count >= 10) return "red";
+  if(count >= 5) return "orange";
+  return "green";
+}
+
+/* ===== データ取得 & 処理 ===== */
+async function loadData(){
+  const snapshot = await getDocs(collection(db, "raw_sessions"));
+  const events = [];
+
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    if(!data.logs) return;
+
+    data.logs.forEach(log => {
+      if(log.isEvent){
+        events.push(log);
+      }
+    });
+  });
+
+  const groups = [];
+
+  events.forEach(e => {
+    let group = null;
+
+    for(const g of groups){
+      if(distanceMeters(e.lat,e.lng,g.lat,g.lng) < GROUP_DISTANCE_M){
+        group = g;
+        break;
+      }
+    }
+
+    if(!group){
+      groups.push({
+        lat: e.lat,
+        lng: e.lng,
+        diffs: [e.diff]
+      });
+    } else {
+      group.lat = (group.lat * group.diffs.length + e.lat) / (group.diffs.length + 1);
+      group.lng = (group.lng * group.diffs.length + e.lng) / (group.diffs.length + 1);
+      group.diffs.push(e.diff);
+    }
+  });
+
+  groups.forEach(g => {
+    const count = g.diffs.length;
+    const avg = g.diffs.reduce((a,b)=>a+b,0) / count;
+    const max = Math.max(...g.diffs);
+    const color = getColorByCount(count);
+
+    const icon = L.divIcon({
+      html: `<span style="color:${color}; font-size:18px;">●</span>`,
+      className: "",
+      iconSize: [18,18],
+      iconAnchor: [9,9]
+    });
+
+    L.marker([g.lat,g.lng],{icon})
+      .addTo(map)
+      .bindPopup(`
+        <b>段差検出地点</b><br>
+        検出回数：${count}回<br>
+        平均diff：${avg.toFixed(2)}<br>
+        最大diff：${max.toFixed(2)}
+      `);
+  });
+}
+
+/* ===== 凡例 ===== */
+const legend = L.control({ position: "bottomright" });
+
+legend.onAdd = function(){
+  const div = L.DomUtil.create("div","legend");
+  div.innerHTML = `
+    <b>凡例（検出回数）</b><br>
+    <span style="color:green;">●</span> 1〜4回<br>
+    <span style="color:orange;">●</span> 5〜9回<br>
+    <span style="color:red;">●</span> 10回以上
+  `;
+  return div;
+};
+
+legend.addTo(map);
+
+/* ===== 実行 ===== */
+loadData();
+</script>
+
+</body>
+</html>
