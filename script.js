@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
+
 /* ===== Firebase ===== */
 const firebaseConfig = {
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
@@ -10,17 +11,20 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+
 /* ===== DOM ===== */
 const startStopBtn = document.getElementById("startStopBtn");
 const statusText = document.getElementById("statusText");
 const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
+
 /* ===== 設定 ===== */
 const THRESHOLD = 27;        // 全体の変化量
 const Z_THRESHOLD = 10;     // Z軸単体のしきい値
 const DISTANCE_FILTER_M = 5;
 const PRE_N = 3;
+
 
 /* ===== 状態 ===== */
 let isMeasuring = false;
@@ -32,11 +36,13 @@ let prevAcc = null;
 let recentSamples = [];
 let eventMarkers = [];
 
+
 /* ===== Utility ===== */
 function logUI(msg){
   resultText.textContent = msg;
   console.log(msg);
 }
+
 
 function distanceMeters(lat1,lng1,lat2,lng2){
   const R = 6371000;
@@ -49,6 +55,7 @@ function distanceMeters(lat1,lng1,lat2,lng2){
   return R * 2 * Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
+
 /* ===== Map ===== */
 function initMap(lat,lng){
   if(map) return;
@@ -59,11 +66,13 @@ function initMap(lat,lng){
   userMarker = L.marker([lat,lng]).addTo(map);
 }
 
+
 function updateMap(lat,lng){
   if(!map) initMap(lat,lng);
   userMarker.setLatLng([lat,lng]);
   map.setView([lat,lng]);
 }
+
 
 /* ===== Firestore ===== */
 async function saveEvent(samples){
@@ -74,23 +83,30 @@ async function saveEvent(samples){
   });
 }
 
+
 /* ===== Motion ===== */
 function handleMotion(e){
   if(!isMeasuring || !lastPosition) return;
 
+
   const acc = e.accelerationIncludingGravity;
   if(!acc) return;
 
+
   const curr = { x: acc.x||0, y: acc.y||0, z: acc.z||0 };
+
 
   if(prevAcc){
     const dx = Math.abs(curr.x - prevAcc.x);
     const dy = Math.abs(curr.y - prevAcc.y);
     const dz = Math.abs(curr.z - prevAcc.z);
 
+
     const diff = dx + dy + 3 * dz;
 
+
     accelerationText.textContent = `diff=${diff.toFixed(2)} (dz=${dz.toFixed(2)})`;
+
 
     const sample = {
       x: curr.x,
@@ -103,8 +119,10 @@ function handleMotion(e){
       isEvent: false
     };
 
+
     recentSamples.push(sample);
     if(recentSamples.length > 50) recentSamples.shift();
+
 
     /* ===== 段差判定 ===== */
     if (
@@ -123,9 +141,11 @@ function handleMotion(e){
         }
       }
 
+
       sample.isEvent = true;
       const context = recentSamples.slice(-PRE_N);
       saveEvent(context);
+
 
       const icon = L.divIcon({
         html:"📍",
@@ -134,17 +154,21 @@ function handleMotion(e){
         iconAnchor:[8,16]
       });
 
+
       L.marker([sample.lat,sample.lng],{icon})
         .addTo(map)
         .bindPopup(`段差検出<br>diff=${diff.toFixed(2)}<br>dz=${dz.toFixed(2)}`);
+
 
       eventMarkers.push({lat:sample.lat,lng:sample.lng});
       logUI(`段差検出 diff=${diff.toFixed(2)}`);
     }
   }
 
+
   prevAcc = curr;
 }
+
 
 /* ===== GPS ===== */
 function startGPS(){
@@ -162,6 +186,7 @@ function startGPS(){
   );
 }
 
+
 /* ===== Permission ===== */
 async function requestMotionPermission(){
   if(typeof DeviceMotionEvent?.requestPermission === "function"){
@@ -170,6 +195,7 @@ async function requestMotionPermission(){
   }
   return true;
 }
+
 
 /* ===== Start / Stop ===== */
 startStopBtn.addEventListener("click", async ()=>{
