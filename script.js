@@ -17,11 +17,10 @@ const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
 /* ===== 設定 ===== */
-const STEP_THRESHOLD = 27;    // 段差判定しきい値
-const CURVE_THRESHOLD = 15;   // カーブ判定しきい値
-const Z_THRESHOLD = 10;       // Z軸判定
-const DISTANCE_FILTER_M = 5;  // 近距離フィルタ
-const PRE_N = 3;              // 保存する直近サンプル数
+const THRESHOLD = 27;        // 全体の変化量
+const Z_THRESHOLD = 10;     // Z軸単体のしきい値
+const DISTANCE_FILTER_M = 5;
+const PRE_N = 3;
 
 /* ===== 状態 ===== */
 let isMeasuring = false;
@@ -34,7 +33,7 @@ let recentSamples = [];
 let eventMarkers = [];
 
 /* ===== Utility ===== */
-function logUI(msg) {
+function logUI(msg){
   resultText.textContent = msg;
   console.log(msg);
 }
@@ -43,10 +42,11 @@ function distanceMeters(lat1,lng1,lat2,lng2){
   const R = 6371000;
   const dLat = (lat2-lat1)*Math.PI/180;
   const dLng = (lng2-lng1)*Math.PI/180;
-  const a = Math.sin(dLat/2)**2 +
-    Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180) *
+  const a =
+    Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
     Math.sin(dLng/2)**2;
-  return 2*R*Math.asin(Math.sqrt(a));
+  return R * 2 * Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
 /* ===== Map ===== */
@@ -87,7 +87,8 @@ function handleMotion(e){
     const dx = Math.abs(curr.x - prevAcc.x);
     const dy = Math.abs(curr.y - prevAcc.y);
     const dz = Math.abs(curr.z - prevAcc.z);
-    const diff = dx + dy + 3*dz;
+
+    const diff = dx + dy + 3 * dz;
 
     accelerationText.textContent = `diff=${diff.toFixed(2)} (dz=${dz.toFixed(2)})`;
 
@@ -99,53 +100,46 @@ function handleMotion(e){
       lat: lastPosition.latitude,
       lng: lastPosition.longitude,
       timestamp: new Date().toISOString(),
-      isEvent: false,
-      type: null
+      isEvent: false
     };
 
     recentSamples.push(sample);
     if(recentSamples.length > 50) recentSamples.shift();
 
-    let detectedType = null;
-
-    // 段差判定
-    if(diff > STEP_THRESHOLD && dz > Z_THRESHOLD && dz > dx && dz > dy){
-      detectedType = "step";
-    }
-    // カーブ判定
-    else if(diff > CURVE_THRESHOLD && dz < Z_THRESHOLD && (dx + dy) > dz){
-      detectedType = "curve";
-    }
-
-    if(detectedType){
+    /* ===== 段差判定 ===== */
+    if (
+      diff > THRESHOLD &&
+      dz > Z_THRESHOLD &&
+      dz > dx && dz > dy
+    ) {
       // 距離フィルタ
       for(const m of eventMarkers){
-        if(distanceMeters(m.lat,m.lng,sample.lat,sample.lng) < DISTANCE_FILTER_M){
+        if(distanceMeters(
+          m.lat, m.lng,
+          sample.lat, sample.lng
+        ) < DISTANCE_FILTER_M){
           prevAcc = curr;
           return;
         }
       }
 
       sample.isEvent = true;
-      sample.type = detectedType;
-
       const context = recentSamples.slice(-PRE_N);
       saveEvent(context);
 
-      const color = detectedType === "step" ? "red" : "blue";
       const icon = L.divIcon({
         html:"📍",
-        className: detectedType === "step" ? "red-pin" : "blue-pin",
+        className:"red-pin",
         iconSize:[16,16],
         iconAnchor:[8,16]
       });
 
       L.marker([sample.lat,sample.lng],{icon})
         .addTo(map)
-        .bindPopup(`${detectedType === "step" ? "段差" : "カーブ"}検出<br>diff=${diff.toFixed(2)}<br>dz=${dz.toFixed(2)}`);
+        .bindPopup(`段差検出<br>diff=${diff.toFixed(2)}<br>dz=${dz.toFixed(2)}`);
 
       eventMarkers.push({lat:sample.lat,lng:sample.lng});
-      logUI(`${detectedType}検出 diff=${diff.toFixed(2)}`);
+      logUI(`段差検出 diff=${diff.toFixed(2)}`);
     }
   }
 
