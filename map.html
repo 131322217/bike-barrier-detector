@@ -1,236 +1,43 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8">
   <title>Barrier Map</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet/dist/leaflet.css"
-  />
-
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
   <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-    }
-
-    #map {
-      width: 100%;
-      height: 100%;
-    }
-
-    /* ===== 凡例 ===== */
-    .legend {
-      background: rgba(255, 255, 255, 0.9);
-      padding: 6px 8px;
-      font-size: 12px;
-      line-height: 1.4;
-      border-radius: 6px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-    }
-
-    .legend-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 4px;
-    }
-
-    .legend-color {
-      width: 12px;
-      height: 12px;
-      margin-right: 6px;
-      border-radius: 50%;
-    }
-
-    /* スマホ向け微調整 */
-    @media (max-width: 600px) {
-      .legend {
-        font-size: 11px;
-        padding: 5px 6px;
-      }
-    }
+    #map { height: 100vh; }
   </style>
 </head>
 <body>
-
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-<!-- Firebase -->
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-  import {
-    getFirestore,
-    collection,
-    getDocs
-  } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-  /* ===== Firebase 設定 ===== */
-  const firebaseConfig = {
-    apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
-    authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
-    projectId: "bike-barrier-detector-1e128"
-  };
+const app = initializeApp({
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
+  projectId: "bike-barrier-detector-1e128"
+});
+const db = getFirestore(app);
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
+const map = L.map("map").setView([35.68, 139.76], 15);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-  /* ===== 地図初期化 ===== */
-  const map = L.map("map");
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap contributors"
+const snap = await getDocs(collection(db, "logs"));
+
+snap.forEach(doc => {
+  const d = doc.data();
+  const color = d.type === "step" ? "red" : "blue";
+
+  L.circleMarker([d.lat, d.lng], {
+    radius: 6,
+    color,
+    fillOpacity: 0.7
   }).addTo(map);
-
-  /* ===== 設定 ===== */
-  const GROUP_DISTANCE_M = 5; // 5m以内で同一地点扱い
-
-  /* ===== 距離計算（Haversine） ===== */
-  function distanceMeters(lat1, lng1, lat2, lng2) {
-    const R = 6371000;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(lat1 * Math.PI / 180) *
-      Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLng / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
-  }
-
-  /* ===== 色決定 ===== */
-  function getColor(count) {
-    if (count >= 10) return "red";
-    if (count >= 5) return "orange";
-    return "blue";
-  }
-
-  /* ===== データ取得 ===== */
-  async function loadData() {
-    const snapshot = await getDocs(collection(db, "raw_sessions"));
-    const points = [];
-
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      if (!data.logs) return;
-
-      data.logs.forEach(log => {
-        if (log.isEvent && log.lat && log.lng) {
-          points.push({
-            lat: log.lat,
-            lng: log.lng,
-            diff: log.diff || 0
-          });
-        }
-      });
-    });
-
-    return points;
-  }
-
-  /* ===== グルーピング ===== */
-  function groupPoints(points) {
-    const groups = [];
-
-    points.forEach(p => {
-      let added = false;
-
-      for (const g of groups) {
-        const d = distanceMeters(p.lat, p.lng, g.lat, g.lng);
-        if (d <= GROUP_DISTANCE_M) {
-          g.count++;
-          g.sumLat += p.lat;
-          g.sumLng += p.lng;
-          g.sumDiff += p.diff;
-          g.maxDiff = Math.max(g.maxDiff, p.diff);
-
-          g.lat = g.sumLat / g.count;
-          g.lng = g.sumLng / g.count;
-          added = true;
-          break;
-        }
-      }
-
-      if (!added) {
-        groups.push({
-          lat: p.lat,
-          lng: p.lng,
-          sumLat: p.lat,
-          sumLng: p.lng,
-          sumDiff: p.diff,
-          maxDiff: p.diff,
-          count: 1
-        });
-      }
-    });
-
-    return groups;
-  }
-
-  /* ===== メイン処理 ===== */
-  const points = await loadData();
-  const groups = groupPoints(points);
-
-  if (groups.length === 0) {
-    map.setView([35.681236, 139.767125], 13); // データなし時（東京）
-  } else {
-    // 一番データが多い地点を初期表示
-    const center = groups.reduce((a, b) => a.count > b.count ? a : b);
-    map.setView([center.lat, center.lng], 16);
-  }
-
-  groups.forEach(g => {
-    const avgDiff = g.sumDiff / g.count;
-    const color = getColor(g.count);
-
-    L.circleMarker([g.lat, g.lng], {
-      radius: 8,
-      color,
-      fillColor: color,
-      fillOpacity: 0.7
-    })
-      .addTo(map)
-      .bindPopup(
-        `
-        <b>段差検出地点</b><br>
-        検出回数：${g.count} 回<br>
-        平均 diff：${avgDiff.toFixed(2)}<br>
-        最大 diff：${g.maxDiff.toFixed(2)}
-        `
-      );
-  });
-
-  /* ===== 凡例 ===== */
-  const isMobile = window.innerWidth <= 600;
-  const legend = L.control({
-    position: isMobile ? "topleft" : "bottomright"
-  });
-
-  legend.onAdd = function () {
-    const div = L.DomUtil.create("div", "legend");
-    div.innerHTML = `
-      <div><b>凡例</b></div>
-      <div class="legend-item">
-        <div class="legend-color" style="background:blue"></div>
-        1–4回
-      </div>
-      <div class="legend-item">
-        <div class="legend-color" style="background:orange"></div>
-        5–9回
-      </div>
-      <div class="legend-item">
-        <div class="legend-color" style="background:red"></div>
-        10回以上
-      </div>
-    `;
-    return div;
-  };
-
-  legend.addTo(map);
+});
 </script>
-
 </body>
 </html>
