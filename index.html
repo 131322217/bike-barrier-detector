@@ -2,33 +2,22 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Bike Sensor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bike Barrier Detector</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 </head>
 <body>
-  <h2>自転車 加速度計測</h2>
+<div class="container">
+  <h1>加速度測定＆地図表示</h1>
+  <button id="startStopBtn">測定開始</button>
+  <div id="statusText">測定していません</div>
+  <div id="accelerationText">加速度変化量: 0.00</div>
+  <div id="map"></div>
+  <div id="resultText"></div>
+</div>
 
-  <button id="startBtn">測定開始</button>
-  <button id="stopBtn">測定停止</button>
-
-  <p id="status">未開始</p>
-
-  <script type="module">
-    import { startMeasure, stopMeasure } from "./script.js";
-
-    document.getElementById("startBtn").onclick = async () => {
-      if (typeof DeviceMotionEvent?.requestPermission === "function") {
-        const res = await DeviceMotionEvent.requestPermission();
-        if (res !== "granted") return alert("センサー許可が必要です");
-      }
-      startMeasure();
-      document.getElementById("status").textContent = "計測中";
-    };
-
-    document.getElementById("stopBtn").onclick = () => {
-      stopMeasure();
-      document.getElementById("status").textContent = "停止中";
-    };
-  </script>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script type="module" src="script.js"></script>
 </body>
 </html>

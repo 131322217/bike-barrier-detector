@@ -1,98 +1,198 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// Firebase
+/* ===== Firebase ===== */
 const firebaseConfig = {
-  apiKey: "YOUR_KEY",
-  authDomain: "YOUR_DOMAIN",
-  projectId: "YOUR_PROJECT_ID"
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
+  projectId: "bike-barrier-detector-1e128"
 };
-
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// ===== 設定 =====
-const W = 3;
-const THRESHOLD = 27;
-const Z_THRESHOLD = 3;
+/* ===== DOM ===== */
+const startStopBtn = document.getElementById("startStopBtn");
+const statusText = document.getElementById("statusText");
+const accelerationText = document.getElementById("accelerationText");
+const resultText = document.getElementById("resultText");
 
-// セッションID（ページ開いた単位）
-const sessionId = crypto.randomUUID();
+/* ===== 設定 ===== */
+const STEP_THRESHOLD = 27;   // 段差
+const CURVE_THRESHOLD = 15;  // カーブ
+const Z_THRESHOLD = 10;      // Z軸判定
+const DISTANCE_FILTER_M = 5;
+const PRE_N = 3;
 
-let prev = null;
-let currentPos = null;
+/* ===== 状態 ===== */
+let isMeasuring = false;
+let sessionId = null;
+let map = null;
+let userMarker = null;
+let lastPosition = null;
+let prevAcc = null;
+let recentSamples = [];
+let eventMarkers = [];
 
-// 位置取得
-navigator.geolocation.watchPosition(pos => {
-  currentPos = pos.coords;
-});
-
-// 判定関数
-function detect(prev, curr) {
-  const dx = Math.abs(curr.x - prev.x);
-  const dy = Math.abs(curr.y - prev.y);
-  const dz = Math.abs(curr.z - prev.z);
-
-  const diff = dx + dy + W * dz;
-
-  const isStep =
-    diff > THRESHOLD &&
-    dz > Z_THRESHOLD &&
-    dz > dx &&
-    dz > dy;
-
-  const isCurve =
-    diff > 10 &&
-    dz < Z_THRESHOLD &&
-    (dx + dy) > dz;
-
-  let type = null;
-  if (isStep) type = "step";
-  else if (isCurve) type = "curve";
-
-  return { dx, dy, dz, diff, type };
+/* ===== Utility ===== */
+function logUI(msg){
+  resultText.textContent = msg;
+  console.log(msg);
 }
 
-// 計測開始
-window.start = async () => {
-  if (
-    typeof DeviceMotionEvent !== "undefined" &&
-    typeof DeviceMotionEvent.requestPermission === "function"
-  ) {
-    await DeviceMotionEvent.requestPermission();
-  }
+function distanceMeters(lat1,lng1,lat2,lng2){
+  const R = 6371000;
+  const dLat = (lat2-lat1)*Math.PI/180;
+  const dLng = (lng2-lng1)*Math.PI/180;
+  const a = Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180) *
+    Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
 
-  window.addEventListener("devicemotion", async e => {
-    const acc = e.accelerationIncludingGravity;
-    if (!acc || !currentPos) return;
+/* ===== Map ===== */
+function initMap(lat,lng){
+  if(map) return;
+  map = L.map("map").setView([lat,lng],17);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution:"© OpenStreetMap contributors"
+  }).addTo(map);
+  userMarker = L.marker([lat,lng]).addTo(map);
+}
 
-    const curr = {
-      x: acc.x,
-      y: acc.y,
-      z: acc.z
-    };
+function updateMap(lat,lng){
+  if(!map) initMap(lat,lng);
+  userMarker.setLatLng([lat,lng]);
+  map.setView([lat,lng]);
+}
 
-    if (!prev) {
-      prev = curr;
-      return;
+/* ===== Firestore ===== */
+async function saveEvent(samples){
+  await addDoc(collection(db,"raw_sessions"),{
+    sessionId,
+    createdAt: new Date().toISOString(),
+    logs: samples
+  });
+}
+
+/* ===== Motion ===== */
+function handleMotion(e){
+  if(!isMeasuring || !lastPosition) return;
+
+  const acc = e.accelerationIncludingGravity;
+  if(!acc) return;
+
+  const curr = { x: acc.x||0, y: acc.y||0, z: acc.z||0 };
+
+  if(prevAcc){
+    const dx = Math.abs(curr.x - prevAcc.x);
+    const dy = Math.abs(curr.y - prevAcc.y);
+    const dz = Math.abs(curr.z - prevAcc.z);
+    const diff = dx + dy + 3 * dz;
+
+    accelerationText.textContent = `diff=${diff.toFixed(2)} (dz=${dz.toFixed(2)})`;
+
+    let type = null;
+
+    // 段差判定
+    if(diff > STEP_THRESHOLD && dz > Z_THRESHOLD && dz > dx && dz > dy){
+      type = "step";
+    }
+    // カーブ判定
+    else if(diff > CURVE_THRESHOLD && dz < Z_THRESHOLD && (dx + dy) > dz){
+      type = "curve";
     }
 
-    const result = detect(prev, curr);
+    if(type){
+      // 距離フィルタ
+      for(const m of eventMarkers){
+        if(distanceMeters(m.lat, m.lng, lastPosition.latitude, lastPosition.longitude) < DISTANCE_FILTER_M){
+          prevAcc = curr;
+          return;
+        }
+      }
 
-    if (result.type) {
-      await addDoc(collection(db, "events"), {
-        lat: currentPos.latitude,
-        lng: currentPos.longitude,
+      const sample = {
         x: curr.x,
         y: curr.y,
         z: curr.z,
-        diff: result.diff,
-        type: result.type,        // ← ここが重要
+        diff,
+        lat: lastPosition.latitude,
+        lng: lastPosition.longitude,
         timestamp: new Date().toISOString(),
-        sessionId: sessionId
-      });
-    }
+        type,
+        sessionId
+      };
 
-    prev = curr;
-  });
-};
+      recentSamples.push(sample);
+      if(recentSamples.length > 50) recentSamples.shift();
+      const context = recentSamples.slice(-PRE_N);
+      saveEvent(context);
+
+      const color = type === "step" ? "red" : "blue";
+      const icon = L.divIcon({
+        html:"📍",
+        className: type === "step" ? "red-pin" : "blue-pin",
+        iconSize:[16,16],
+        iconAnchor:[8,16]
+      });
+
+      L.marker([sample.lat,sample.lng],{icon})
+        .addTo(map)
+        .bindPopup(`${type === "step" ? "段差" : "カーブ"}検出<br>diff=${diff.toFixed(2)}<br>dz=${dz.toFixed(2)}`);
+
+      eventMarkers.push({lat:sample.lat,lng:sample.lng});
+      logUI(`${type}検出 diff=${diff.toFixed(2)}`);
+    }
+  }
+
+  prevAcc = curr;
+}
+
+/* ===== GPS ===== */
+function startGPS(){
+  navigator.geolocation.watchPosition(
+    pos=>{
+      lastPosition = pos.coords;
+      updateMap(pos.coords.latitude,pos.coords.longitude);
+      statusText.textContent = "測定中（GPS取得中）";
+    },
+    err=>{
+      console.warn(err);
+      statusText.textContent = "位置情報取得エラー";
+    },
+    { enableHighAccuracy:true }
+  );
+}
+
+/* ===== Permission ===== */
+async function requestMotionPermission(){
+  if(typeof DeviceMotionEvent?.requestPermission === "function"){
+    const res = await DeviceMotionEvent.requestPermission();
+    return res === "granted";
+  }
+  return true;
+}
+
+/* ===== Start / Stop ===== */
+startStopBtn.addEventListener("click", async ()=>{
+  if(!isMeasuring){
+    if(!await requestMotionPermission()){
+      alert("加速度センサの許可が必要です");
+      return;
+    }
+    isMeasuring = true;
+    sessionId = new Date().toISOString();
+    prevAcc = null;
+    recentSamples = [];
+    eventMarkers = [];
+    startStopBtn.textContent = "測定終了";
+    statusText.textContent = "測定中...";
+    startGPS();
+    window.addEventListener("devicemotion",handleMotion);
+  } else {
+    isMeasuring = false;
+    startStopBtn.textContent = "測定開始";
+    statusText.textContent = "測定停止";
+    window.removeEventListener("devicemotion",handleMotion);
+  }
+});
