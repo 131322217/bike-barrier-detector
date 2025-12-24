@@ -17,8 +17,9 @@ const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
 /* ===== 設定 ===== */
-const THRESHOLD = 5.0;          // 段差判定しきい値
-const DISTANCE_FILTER_M = 5;    // 距離フィルタ（m）
+const THRESHOLD = 27;        // 全体の変化量
+const Z_THRESHOLD = 10;     // Z軸単体のしきい値
+const DISTANCE_FILTER_M = 5;
 const PRE_N = 3;
 
 /* ===== 状態 ===== */
@@ -83,12 +84,13 @@ function handleMotion(e){
   const curr = { x: acc.x||0, y: acc.y||0, z: acc.z||0 };
 
   if(prevAcc){
-    const diff =
-      Math.abs(curr.x - prevAcc.x) +
-      Math.abs(curr.y - prevAcc.y) +
-      3 * Math.abs(curr.z - prevAcc.z);
+    const dx = Math.abs(curr.x - prevAcc.x);
+    const dy = Math.abs(curr.y - prevAcc.y);
+    const dz = Math.abs(curr.z - prevAcc.z);
 
-    accelerationText.textContent = `加速度変化量: ${diff.toFixed(2)}`;
+    const diff = dx + dy + 3 * dz;
+
+    accelerationText.textContent = `diff=${diff.toFixed(2)} (dz=${dz.toFixed(2)})`;
 
     const sample = {
       x: curr.x,
@@ -104,13 +106,19 @@ function handleMotion(e){
     recentSamples.push(sample);
     if(recentSamples.length > 50) recentSamples.shift();
 
-    if(diff > THRESHOLD){
+    /* ===== 段差判定 ===== */
+    if (
+      diff > THRESHOLD &&
+      dz > Z_THRESHOLD &&
+      dz > dx && dz > dy
+    ) {
       // 距離フィルタ
       for(const m of eventMarkers){
         if(distanceMeters(
-          m.lat,m.lng,
-          sample.lat,sample.lng
+          m.lat, m.lng,
+          sample.lat, sample.lng
         ) < DISTANCE_FILTER_M){
+          prevAcc = curr;
           return;
         }
       }
@@ -128,7 +136,7 @@ function handleMotion(e){
 
       L.marker([sample.lat,sample.lng],{icon})
         .addTo(map)
-        .bindPopup(`段差検出<br>diff=${diff.toFixed(2)}`);
+        .bindPopup(`段差検出<br>diff=${diff.toFixed(2)}<br>dz=${dz.toFixed(2)}`);
 
       eventMarkers.push({lat:sample.lat,lng:sample.lng});
       logUI(`段差検出 diff=${diff.toFixed(2)}`);
