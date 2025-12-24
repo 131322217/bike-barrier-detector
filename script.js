@@ -1,86 +1,98 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 
-/* Firebase */
+// Firebase
 const firebaseConfig = {
-  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
-  authDomain: "bike-barrier-detector-1e128.firebaseapp.com",
-  projectId: "bike-barrier-detector-1e128"
+  apiKey: "YOUR_KEY",
+  authDomain: "YOUR_DOMAIN",
+  projectId: "YOUR_PROJECT_ID"
 };
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-/* 設定 */
-const STEP_THRESHOLD = 28;
-const CURVE_THRESHOLD = 18;
+// ===== 設定 =====
+const W = 3;
+const THRESHOLD = 27;
+const Z_THRESHOLD = 3;
 
-let prevAcc = null;
-let lastPosition = null;
-let measuring = false;
+// セッションID（ページ開いた単位）
+const sessionId = crypto.randomUUID();
 
-/* GPS */
+let prev = null;
+let currentPos = null;
+
+// 位置取得
 navigator.geolocation.watchPosition(pos => {
-  lastPosition = pos.coords;
-}, err => console.error(err), {
-  enableHighAccuracy: true
+  currentPos = pos.coords;
 });
 
-/* 判定 */
-function judge(dx, dy, dz, diff) {
-  if (dz > dx && dz > dy && diff > STEP_THRESHOLD) return "step";
-  if ((dx + dy) > dz && diff > CURVE_THRESHOLD) return "curve";
-  return null;
+// 判定関数
+function detect(prev, curr) {
+  const dx = Math.abs(curr.x - prev.x);
+  const dy = Math.abs(curr.y - prev.y);
+  const dz = Math.abs(curr.z - prev.z);
+
+  const diff = dx + dy + W * dz;
+
+  const isStep =
+    diff > THRESHOLD &&
+    dz > Z_THRESHOLD &&
+    dz > dx &&
+    dz > dy;
+
+  const isCurve =
+    diff > 10 &&
+    dz < Z_THRESHOLD &&
+    (dx + dy) > dz;
+
+  let type = null;
+  if (isStep) type = "step";
+  else if (isCurve) type = "curve";
+
+  return { dx, dy, dz, diff, type };
 }
 
-/* 保存 */
-async function save(data) {
-  await addDoc(collection(db, "logs"), data);
-}
+// 計測開始
+window.start = async () => {
+  if (
+    typeof DeviceMotionEvent !== "undefined" &&
+    typeof DeviceMotionEvent.requestPermission === "function"
+  ) {
+    await DeviceMotionEvent.requestPermission();
+  }
 
-/* 加速度処理 */
-function onMotion(e) {
-  if (!measuring || !lastPosition) return;
+  window.addEventListener("devicemotion", async e => {
+    const acc = e.accelerationIncludingGravity;
+    if (!acc || !currentPos) return;
 
-  const a = e.accelerationIncludingGravity;
-  if (!a) return;
+    const curr = {
+      x: acc.x,
+      y: acc.y,
+      z: acc.z
+    };
 
-  const curr = { x: a.x || 0, y: a.y || 0, z: a.z || 0 };
+    if (!prev) {
+      prev = curr;
+      return;
+    }
 
-  if (prevAcc) {
-    const dx = Math.abs(curr.x - prevAcc.x);
-    const dy = Math.abs(curr.y - prevAcc.y);
-    const dz = Math.abs(curr.z - prevAcc.z);
-    const diff = dx + dy + 3 * dz;
+    const result = detect(prev, curr);
 
-    const type = judge(dx, dy, dz, diff);
-
-    if (type) {
-      save({
+    if (result.type) {
+      await addDoc(collection(db, "events"), {
+        lat: currentPos.latitude,
+        lng: currentPos.longitude,
         x: curr.x,
         y: curr.y,
         z: curr.z,
-        diff,
-        lat: lastPosition.latitude,
-        lng: lastPosition.longitude,
+        diff: result.diff,
+        type: result.type,        // ← ここが重要
         timestamp: new Date().toISOString(),
-        type
+        sessionId: sessionId
       });
-      console.log(type, diff.toFixed(1));
     }
-  }
 
-  prevAcc = curr;
-}
-
-/* 外部呼び出し */
-export function startMeasure() {
-  measuring = true;
-  prevAcc = null;
-  window.addEventListener("devicemotion", onMotion);
-}
-
-export function stopMeasure() {
-  measuring = false;
-  window.removeEventListener("devicemotion", onMotion);
-}
+    prev = curr;
+  });
+};
