@@ -8,6 +8,7 @@
   <style>
     html, body { height: 100%; margin: 0; }
     #map { width: 100%; height: 100%; }
+
     .panel {
       position: absolute;
       top: 10px; left: 10px;
@@ -136,16 +137,15 @@ function draw() {
 
   const groups = groupPoints(data);
 
-  if(groups.length===0){
-    map.setView([35.68, 139.76], 13);
-    return;
+  // 初期位置設定
+  if(groups.length === 0){
+    map.setView([35.681236, 139.767125], 13); // データなし時は東京
   } else {
     const center = groups.reduce((a,b)=> a.count>b.count?a:b);
     map.setView([center.lat, center.lng], 16);
   }
 
   groups.forEach(g=>{
-    // 信頼度判定
     let stepRatio = (g.typeCount['step']||0)/g.count;
     let type = 'curve';
     if(stepRatio>=level) type = 'step';
@@ -156,7 +156,6 @@ function draw() {
       radius:8, color, fillColor:color, fillOpacity:0.7
     }).addTo(map);
 
-    // ポップアップに詳細リンク追加
     marker.bindPopup(`
       <b>${type==='step'?'段差':'カーブ'}</b><br>
       検出回数：${g.count} 回<br>
