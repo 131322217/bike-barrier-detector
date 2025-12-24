@@ -8,7 +8,6 @@
   <style>
     html, body { height: 100%; margin: 0; }
     #map { width: 100%; height: 100%; }
-
     .panel {
       position: absolute;
       top: 10px; left: 10px;
@@ -17,7 +16,6 @@
       box-shadow: 0 0 6px rgba(0,0,0,0.2);
       z-index: 1000;
     }
-
     .panel button { margin: 2px; padding: 4px 8px; }
     .legend { margin-top: 6px; font-size: 12px; }
     .box { display: inline-block; width:12px; height:12px; margin-right:4px; border-radius:50%; }
@@ -158,11 +156,13 @@ function draw() {
       radius:8, color, fillColor:color, fillOpacity:0.7
     }).addTo(map);
 
+    // ポップアップに詳細リンク追加
     marker.bindPopup(`
       <b>${type==='step'?'段差':'カーブ'}</b><br>
       検出回数：${g.count} 回<br>
       平均 diff：${avgDiff.toFixed(2)}<br>
-      最大 diff：${g.maxDiff.toFixed(2)}
+      最大 diff：${g.maxDiff.toFixed(2)}<br>
+      <a href="detail.html?lat=${g.lat}&lng=${g.lng}" target="_blank">詳細データを見る</a>
     `);
 
     markers.push(marker);

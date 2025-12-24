@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>詳細データ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: sans-serif; padding: 10px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: center; }
+    th { background: #eee; }
+  </style>
+</head>
+<body>
+  <h2>詳細データ</h2>
+  <p id="info"></p>
+  <table>
+    <thead>
+      <tr>
+        <th>diff</th>
+        <th>type</th>
+        <th>x</th>
+        <th>y</th>
+        <th>z</th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+
+  <script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+  import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+    projectId: "bike-barrier-detector-1e128"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // URLクエリパラメータ取得
+  const params = new URLSearchParams(window.location.search);
+  const targetLat = parseFloat(params.get('lat'));
+  const targetLng = parseFloat(params.get('lng'));
+
+  document.getElementById("info").textContent = `表示地点：lat=${targetLat}, lng=${targetLng}`;
+
+  function distanceMeters(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  }
+
+  const GROUP_DISTANCE_M = 5;
+
+  async function loadData() {
+    const snapshot = await getDocs(collection(db, "raw_sessions"));
+    const rows = [];
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if(!data.logs) return;
+
+      data.logs.forEach(log => {
+        if(log.isEvent && log.lat && log.lng) {
+          const d = distanceMeters(log.lat, log.lng, targetLat, targetLng);
+          if(d <= GROUP_DISTANCE_M) {
+            rows.push({
+              diff: log.diff,
+              type: log.type,
+              x: log.x,
+              y: log.y,
+              z: log.z
+            });
+          }
+        }
+      });
+    });
+
+    return rows;
+  }
+
+  const tableBody = document.getElementById("table-body");
+  const rows = await loadData();
+
+  if(rows.length === 0){
+    tableBody.innerHTML = `<tr><td colspan="5">データなし</td></tr>`;
+  } else {
+    rows.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${r.diff}</td><td>${r.type}</td><td>${r.x}</td><td>${r.y}</td><td>${r.z}</td>`;
+      tableBody.appendChild(tr);
+    });
+  }
+  </script>
+</body>
+</html>
