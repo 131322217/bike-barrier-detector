@@ -1,31 +1,44 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8" />
-<title>Barrier Map</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-<style>
-html, body { height: 100%; margin: 0; }
-#map { width: 100%; height: 100%; }
-.panel {
-  position: absolute; top:10px; left:10px; background:white; padding:8px; border-radius:6px; font-size:13px; z-index:1000;
-}
-.panel button { margin:2px; padding:4px 6px; }
-</style>
+  <meta charset="UTF-8">
+  <title>Barrier Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { width: 100%; height: 100%; }
+
+    .panel {
+      position: absolute;
+      top: 10px; left: 10px;
+      background: white; padding: 8px;
+      border-radius: 8px; font-size: 13px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.2);
+      z-index: 1000;
+    }
+
+    .panel button { margin: 2px; padding: 4px 8px; }
+    .legend { margin-top: 6px; font-size: 12px; }
+    .box { display: inline-block; width:12px; height:12px; margin-right:4px; border-radius:50%; }
+  </style>
 </head>
 <body>
-
 <div id="map"></div>
+
 <div class="panel">
-  <b>表示</b><br>
-  <button onclick="setLatest(true)">最新のみ</button>
-  <button onclick="setLatest(false)">全データ</button>
+  <b>表示モード</b><br>
+  <button onclick="setMode('latest')">最新のみ</button>
+  <button onclick="setMode('all')">全データ</button>
   <hr>
   <b>段差信頼度</b><br>
-  <button onclick="setThreshold(0.6)">6割</button>
-  <button onclick="setThreshold(0.7)">7割</button>
-  <button onclick="setThreshold(0.8)">8割</button>
+  <button onclick="setLevel(0.6)">6割</button>
+  <button onclick="setLevel(0.7)">7割</button>
+  <button onclick="setLevel(0.8)">8割</button>
+  <div class="legend">
+    <div><span class="box" style="background:red"></span>段差</div>
+    <div><span class="box" style="background:blue"></span>カーブ</div>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -33,99 +46,135 @@ html, body { height: 100%; margin: 0; }
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
+// Firebase 初期化
 const app = initializeApp({
-  apiKey:"AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
-  projectId:"bike-barrier-detector-1e128"
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
+
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
 let allData = [];
 let markers = [];
-let latestOnly = false;
-let threshold = 0.7; // デフォルト7割
+let mode = 'all';
+let level = 0.7; // 信頼度7割初期
 
-function clearMarkers() {
-  markers.forEach(m => map.removeLayer(m));
-  markers = [];
+// 距離計算（Haversine）
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
 }
 
+// データ取得
 async function loadData() {
-  const snap = await getDocs(collection(db,"raw_sessions"));
+  const snapshot = await getDocs(collection(db, "raw_sessions"));
   const points = [];
-  snap.forEach(doc => {
+
+  snapshot.forEach(doc => {
     const data = doc.data();
     if(!data.logs) return;
+
     data.logs.forEach(log => {
-      if(log.isEvent && log.lat && log.lng){
-        points.push({...log});
+      if(log.isEvent && log.lat && log.lng) {
+        points.push({
+          lat: log.lat,
+          lng: log.lng,
+          diff: log.diff,
+          type: log.type // step or curve
+        });
       }
     });
   });
   return points;
 }
 
-function draw() {
-  clearMarkers();
-  let data = allData;
-
-  if(latestOnly) {
-    // 最新セッションのみ
-    const latestSession = data[data.length-1]?.sessionId;
-    if(latestSession) data = data.filter(d => d.sessionId === latestSession);
-  }
-
-  // グルーピング（5m以内）
+// グルーピング（同地点まとめ）
+function groupPoints(points) {
   const groups = [];
-  data.forEach(p => {
-    let added=false;
-    for(const g of groups){
-      const d = distanceMeters(p.lat,p.lng,g.lat,g.lng);
-      if(d<=5){
-        g.logs.push(p);
-        g.lat = g.logs.reduce((a,b)=>a+b.lat,0)/g.logs.length;
-        g.lng = g.logs.reduce((a,b)=>a+b.lng,0)/g.logs.length;
-        added=true; break;
+  points.forEach(p => {
+    let added = false;
+    for(const g of groups) {
+      const d = distanceMeters(p.lat, p.lng, g.lat, g.lng);
+      if(d <= 5) { // 5m以内
+        g.count++;
+        g.sumLat += p.lat;
+        g.sumLng += p.lng;
+        g.sumDiff += p.diff;
+        g.maxDiff = Math.max(g.maxDiff, p.diff);
+        g.typeCount[p.type] = (g.typeCount[p.type]||0)+1;
+
+        g.lat = g.sumLat/g.count;
+        g.lng = g.sumLng/g.count;
+        added = true;
+        break;
       }
     }
-    if(!added) groups.push({lat:p.lat,lng:p.lng,logs:[p]});
+    if(!added) {
+      groups.push({
+        lat: p.lat, lng: p.lng,
+        sumLat: p.lat, sumLng: p.lng,
+        sumDiff: p.diff,
+        maxDiff: p.diff,
+        count:1,
+        typeCount: { [p.type]: 1 },
+      });
+    }
   });
+  return groups;
+}
+
+// 描画
+function draw() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  let data = [...allData];
+  if(mode==='latest') data = [data[data.length-1]];
+
+  const groups = groupPoints(data);
+
+  if(groups.length===0){
+    map.setView([35.68, 139.76], 13);
+    return;
+  } else {
+    const center = groups.reduce((a,b)=> a.count>b.count?a:b);
+    map.setView([center.lat, center.lng], 16);
+  }
 
   groups.forEach(g=>{
-    const stepCount = g.logs.filter(l=>l.type==="step").length;
-    const stepRatio = stepCount / g.logs.length;
-    g.logs.forEach(l=>{
-      if(l.type==="step" && stepRatio<threshold) return; // 閾値未満の段差は表示しない
-      const color = l.type==="step"?"red":"blue";
-      const m = L.circleMarker([l.lat,l.lng],{radius:6,color,fillColor:color,fillOpacity:0.7}).addTo(map);
-      m.bindPopup(`<b>${l.type}</b><br>diff:${l.diff.toFixed(1)}`);
-      markers.push(m);
-    });
+    // 信頼度判定
+    let stepRatio = (g.typeCount['step']||0)/g.count;
+    let type = 'curve';
+    if(stepRatio>=level) type = 'step';
+    const color = type==='step'?'red':'blue';
+    const avgDiff = g.sumDiff/g.count;
+
+    const marker = L.circleMarker([g.lat, g.lng],{
+      radius:8, color, fillColor:color, fillOpacity:0.7
+    }).addTo(map);
+
+    marker.bindPopup(`
+      <b>${type==='step'?'段差':'カーブ'}</b><br>
+      検出回数：${g.count} 回<br>
+      平均 diff：${avgDiff.toFixed(2)}<br>
+      最大 diff：${g.maxDiff.toFixed(2)}
+    `);
+
+    markers.push(marker);
   });
-
-  if(data.length>0){
-    const avgLat = data.reduce((a,b)=>a+b.lat,0)/data.length;
-    const avgLng = data.reduce((a,b)=>a+b.lng,0)/data.length;
-    map.setView([avgLat,avgLng],16);
-  }
 }
 
-// Haversine距離
-function distanceMeters(lat1,lng1,lat2,lng2){
-  const R=6371000;
-  const dLat=(lat2-lat1)*Math.PI/180;
-  const dLng=(lng2-lng1)*Math.PI/180;
-  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
-  return 2*R*Math.asin(Math.sqrt(a));
-}
-
-// ボタン操作
-window.setLatest = v=>{ latestOnly=v; draw(); }
-window.setThreshold = v=>{ threshold=v; draw(); }
-
+// 初期データ取得して描画
 allData = await loadData();
 draw();
+
+window.setMode = m => { mode=m; draw(); };
+window.setLevel = l => { level=l; draw(); };
 </script>
 </body>
 </html>
