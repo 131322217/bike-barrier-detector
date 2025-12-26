@@ -64,16 +64,6 @@ const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
 /* ===== util ===== */
-function distance(a,b,c,d){
-  const R=6371000;
-  const dLat=(c-a)*Math.PI/180;
-  const dLng=(d-b)*Math.PI/180;
-  return 2*R*Math.asin(Math.sqrt(
-    Math.sin(dLat/2)**2 +
-    Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLng/2)**2
-  ));
-}
-
 function markerColor(label){
   if(label==="step") return "red";
   if(label==="curve") return "blue";
@@ -127,46 +117,12 @@ function draw(){
 
   if(source.length === 0) return;
 
-  /* --- グルーピング（そのまま） --- */
-  const groups = [];
+  map.setView([source[0].lat,source[0].lng],16);
+
   source.forEach(p=>{
-    let g = groups.find(g =>
-      distance(p.lat,p.lng,g.lat,g.lng) < 6 &&
-      Math.abs(p.z - g.avgZ) < 2
-    );
+    const detected = p.type || p.type_detected;
 
-    if(!g){
-      groups.push({
-        lat:p.lat,
-        lng:p.lng,
-        count:1,
-        avgZ:p.z,
-        maxDiff:p.diff,
-        maxAngle:p.angleDiff,
-        typeCount:{ [p.type]:1 }
-      });
-    }else{
-      g.count++;
-      g.avgZ += (p.z - g.avgZ)/g.count;
-      g.maxDiff = Math.max(g.maxDiff, p.diff);
-      g.maxAngle = Math.max(g.maxAngle, p.angleDiff);
-      g.typeCount[p.type]=(g.typeCount[p.type]||0)+1;
-    }
-  });
-
-  function detectedType(g){
-    if((g.typeCount.step||0)/g.count >= 0.6) return "step";
-    if((g.typeCount.curve||0)>0) return "curve";
-    return "candidate";
-  }
-
-  map.setView([groups[0].lat,groups[0].lng],16);
-
-  groups.forEach(g=>{
-    const detected = detectedType(g);
-    let currentLabel = null;
-
-    const marker = L.circleMarker([g.lat,g.lng],{
+    const marker = L.circleMarker([p.lat,p.lng],{
       radius:8,
       color:"#333",
       fillColor:"#333",
@@ -176,9 +132,11 @@ function draw(){
     function popupHTML(active){
       return `
         <b>機械判定：</b>${detected}<br>
-        diff最大：${g.maxDiff.toFixed(1)}<br>
-        z平均：${g.avgZ.toFixed(1)}<br>
-        angle最大：${g.maxAngle.toFixed(1)}<br><br>
+        x平均：${p.x?.toFixed(1) ?? "-"}<br>
+        y平均：${p.y?.toFixed(1) ?? "-"}<br>
+        z平均：${p.z?.toFixed(1) ?? "-"}<br>
+        diff：${p.diff?.toFixed(1) ?? "-"}<br>
+        angleDiff：${p.angleDiff?.toFixed(1) ?? "-"}<br><br>
 
         <b>正解ラベル</b><br>
         <button class="label-btn step ${active==="step"?"active step":""}">段差</button>
@@ -197,8 +155,6 @@ function draw(){
             btn.classList.contains("step") ? "step" :
             btn.classList.contains("curve") ? "curve" : "flat";
 
-          currentLabel = label;
-
           marker.setStyle({
             color: markerColor(label),
             fillColor: markerColor(label)
@@ -207,13 +163,15 @@ function draw(){
           marker.setPopupContent(popupHTML(label));
 
           await addDoc(collection(db,"labels"),{
-            lat:g.lat,
-            lng:g.lng,
+            lat:p.lat,
+            lng:p.lng,
             label_true:label,
             type_detected:detected,
-            diff:g.maxDiff,
-            z:g.avgZ,
-            angleDiff:g.maxAngle,
+            diff:p.diff,
+            x:p.x,
+            y:p.y,
+            z:p.z,
+            angleDiff:p.angleDiff,
             sessionId: currentSession,
             updatedAt:new Date().toISOString()
           });

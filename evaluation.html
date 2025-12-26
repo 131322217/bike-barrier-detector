@@ -9,16 +9,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-box-and-violin-plot/build/Chart.BoxPlot.js"></script>
 
 <style>
-body {
-  font-family: sans-serif;
-  margin: 20px;
-}
+body { font-family: sans-serif; margin: 20px; }
 h1 { margin-bottom: 10px; }
 h2 { margin-top: 40px; }
-canvas {
-  max-width: 900px;
-  margin-bottom: 40px;
-}
+canvas { max-width: 900px; margin-bottom: 40px; }
 </style>
 </head>
 <body>
@@ -34,8 +28,17 @@ canvas {
 <h2>③ z 分布（正解ラベル別）</h2>
 <canvas id="zChart"></canvas>
 
-<h2>④ angleDiff 分布（正解ラベル別）</h2>
+<h2>④ x 分布（正解ラベル別）</h2>
+<canvas id="xChart"></canvas>
+
+<h2>⑤ y 分布（正解ラベル別）</h2>
+<canvas id="yChart"></canvas>
+
+<h2>⑥ angleDiff 分布（正解ラベル別）</h2>
 <canvas id="angleChart"></canvas>
+
+<h2>⑦ diff × angleDiff 散布図（正解ラベル別）</h2>
+<canvas id="scatterChart"></canvas>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
@@ -50,43 +53,22 @@ const db = getFirestore(app);
 
 /* ===== ラベル定義 ===== */
 const KEYS = ["step", "curve", "flat"];
+const LABEL = { step:"段差", curve:"カーブ", flat:"平地" };
+const COLOR = { step:"rgba(220,38,38,0.7)", curve:"rgba(37,99,235,0.7)", flat:"rgba(34,197,94,0.7)" };
 
-const LABEL = {
-  step: "段差",
-  curve: "カーブ",
-  flat: "平地"
-};
-
-const COLOR = {
-  step: "rgba(220,38,38,0.7)",   // 赤
-  curve: "rgba(37,99,235,0.7)",  // 青
-  flat: "rgba(34,197,94,0.7)"    // 緑
-};
-
-/* ===== load labels ===== */
+/* ===== データ取得 ===== */
 const snap = await getDocs(collection(db, "labels"));
 const rows = snap.docs.map(d => d.data());
-
-if (rows.length === 0) {
-  alert("labels にデータがありません");
-}
+if(rows.length === 0) alert("labels にデータがありません");
 
 /* ===== 混同行列 ===== */
 const matrix = {};
-KEYS.forEach(d => {
-  matrix[d] = {};
-  KEYS.forEach(t => matrix[d][t] = 0);
-});
-
+KEYS.forEach(d => { matrix[d] = {}; KEYS.forEach(t => matrix[d][t] = 0); });
 rows.forEach(r => {
-  if (
-    matrix[r.type_detected] &&
-    matrix[r.type_detected][r.label_true] !== undefined
-  ) {
+  if(matrix[r.type_detected] && matrix[r.type_detected][r.label_true] !== undefined){
     matrix[r.type_detected][r.label_true]++;
   }
 });
-
 new Chart(document.getElementById("confusionChart"), {
   type: "bar",
   data: {
@@ -97,16 +79,11 @@ new Chart(document.getElementById("confusionChart"), {
       data: KEYS.map(detKey => matrix[detKey][trueKey])
     }))
   },
-  options: {
-    responsive: true,
-    plugins: {
-      legend: { position: "top" }
-    }
-  }
+  options: { responsive:true, plugins:{ legend:{ position:"top" } } }
 });
 
 /* ===== boxplot 共通関数 ===== */
-function boxDatasets(field) {
+function boxDatasets(field){
   return KEYS.map(k => ({
     label: LABEL[k],
     backgroundColor: COLOR[k],
@@ -117,34 +94,43 @@ function boxDatasets(field) {
   }));
 }
 
-/* ===== diff ===== */
+/* ===== 各ボックスプロット ===== */
 new Chart(document.getElementById("diffChart"), {
-  type: "boxplot",
-  data: {
-    labels: KEYS.map(k => LABEL[k]),
-    datasets: boxDatasets("diff")
-  },
-  options: { responsive: true }
+  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("diff") }, options:{ responsive:true }
 });
-
-/* ===== z ===== */
 new Chart(document.getElementById("zChart"), {
-  type: "boxplot",
-  data: {
-    labels: KEYS.map(k => LABEL[k]),
-    datasets: boxDatasets("z")
-  },
-  options: { responsive: true }
+  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("z") }, options:{ responsive:true }
+});
+new Chart(document.getElementById("xChart"), {
+  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("x") }, options:{ responsive:true }
+});
+new Chart(document.getElementById("yChart"), {
+  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("y") }, options:{ responsive:true }
+});
+new Chart(document.getElementById("angleChart"), {
+  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("angleDiff") }, options:{ responsive:true }
 });
 
-/* ===== angleDiff ===== */
-new Chart(document.getElementById("angleChart"), {
-  type: "boxplot",
-  data: {
-    labels: KEYS.map(k => LABEL[k]),
-    datasets: boxDatasets("angleDiff")
+/* ===== diff × angleDiff 散布図 ===== */
+new Chart(document.getElementById("scatterChart"), {
+  type:'scatter',
+  data:{
+    datasets: KEYS.map(k=>({
+      label: LABEL[k],
+      backgroundColor: COLOR[k],
+      data: rows
+        .filter(r => r.label_true === k && typeof r.diff==="number" && typeof r.angleDiff==="number")
+        .map(r => ({ x:r.diff, y:r.angleDiff }))
+    }))
   },
-  options: { responsive: true }
+  options:{
+    responsive:true,
+    plugins:{ legend:{ position:"top" } },
+    scales:{
+      x:{ title:{ display:true, text:"diff (加速度合計)" } },
+      y:{ title:{ display:true, text:"angleDiff (角度差)" } }
+    }
+  }
 });
 </script>
 

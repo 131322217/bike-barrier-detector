@@ -175,7 +175,6 @@ function handleMotion(e){
   prevAcc = curr;
 }
 
-
 /* ===== GPS ===== */
 function startGPS(){
   navigator.geolocation.watchPosition(
