@@ -5,19 +5,59 @@
 <title>Barrier Map</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+
 <style>
 html, body { height:100%; margin:0; }
 #map { width:100%; height:100%; }
-.panel { position:absolute; top:10px; left:10px; background:white; padding:8px; border-radius:8px; box-shadow:0 0 6px rgba(0,0,0,.2); z-index:1000; width:210px; }
-.panel-header { display:flex; justify-content:space-between; align-items:center; font-weight:bold; }
+
+.panel {
+  position:absolute;
+  top:10px; left:10px;
+  background:white;
+  padding:8px;
+  border-radius:8px;
+  box-shadow:0 0 6px rgba(0,0,0,.2);
+  z-index:1000;
+  width:210px;
+}
+
+.panel-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-weight:bold;
+}
+
 .panel-body { margin-top:6px; }
 .hidden { display:none; }
+
 button, select { width:100%; margin-top:4px; }
+
 .levelBtn.active { background:#007bff; color:white; }
+
 .legend { font-size:12px; margin-top:6px; }
 .box { width:12px; height:12px; display:inline-block; border-radius:50%; margin-right:4px; }
-#noData { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:12px 20px; border-radius:8px; box-shadow:0 0 8px rgba(0,0,0,.3); font-weight:bold; display:none; }
-.label-btn { margin:4px 2px; padding:4px 8px; border-radius:6px; border:1px solid #ccc; cursor:pointer; }
+
+#noData {
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  background:white;
+  padding:12px 20px;
+  border-radius:8px;
+  box-shadow:0 0 8px rgba(0,0,0,.3);
+  font-weight:bold;
+  display:none;
+}
+
+.label-btn {
+  margin:4px 2px;
+  padding:4px 8px;
+  border-radius:6px;
+  border:1px solid #ccc;
+  cursor:pointer;
+}
 .label-btn.active.step  { background:#e53935; color:white; }
 .label-btn.active.curve { background:#1e88e5; color:white; }
 .label-btn.active.flat  { background:#43a047; color:white; }
@@ -33,17 +73,23 @@ button, select { width:100%; margin-top:4px; }
     <span>表示設定</span>
     <button id="toggleBtn">▼</button>
   </div>
+
   <div class="panel-body" id="panelBody">
     <b>セッション</b>
     <select id="sessionSelect"></select>
+
     <hr>
+
     <label><input type="checkbox" id="showStep" checked> 段差</label><br>
     <label><input type="checkbox" id="showCurve" checked> カーブ</label>
+
     <hr>
+
     <b>段差信頼度</b>
     <button class="levelBtn" data-level="0.6">6割</button>
     <button class="levelBtn active" data-level="0.7">7割</button>
     <button class="levelBtn" data-level="0.8">8割</button>
+
     <div class="legend">
       <div><span class="box" style="background:red"></span>段差</div>
       <div><span class="box" style="background:blue"></span>カーブ</div>
@@ -68,13 +114,6 @@ const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
 /* ===== util ===== */
-function markerColor(label){
-  if(label==="step") return "red";
-  if(label==="curve") return "blue";
-  if(label==="flat") return "green";
-  return "#333";
-}
-
 function distance(a,b,c,d){
   const R=6371000;
   const dLat=(c-a)*Math.PI/180;
@@ -85,7 +124,14 @@ function distance(a,b,c,d){
   ));
 }
 
-/* ===== load raw data ===== */
+function markerColor(label){
+  if(label==="step") return "red";
+  if(label==="curve") return "blue";
+  if(label==="flat") return "green";
+  return "#333";
+}
+
+/* ===== load ===== */
 async function load(){
   const snap = await getDocs(collection(db,"raw_sessions"));
   const arr = [];
@@ -142,62 +188,63 @@ function draw(){
     noDataBox.style.display = "none";
   }
 
-  let displayData = [];
+  const groups = [];
 
-  // 「すべて」選択 → グループ化
-  if(selectedSession==="all"){
-    const groups = [];
-    data.forEach(p=>{
-      let g = groups.find(g=>{
-        return distance(p.lat,p.lng,g.lat,g.lng)<5;
+  data.forEach(p=>{
+    let g = null;
+    // 「すべて」の場合だけまとめる
+    if(selectedSession === "all") {
+      g = groups.find(g=>{
+        const d = distance(p.lat,p.lng,g.lat,g.lng);
+        return d<5;
       });
-      if(!g){
-        groups.push({
-          lat:p.lat, lng:p.lng,
-          count:1, sumDiff:p.diff, maxDiff:p.diff,
-          typeCount:{[p.type]:1}, avgX:p.x, avgY:p.y, avgZ:p.z
-        });
-      } else {
-        g.count++;
-        g.sumDiff += p.diff;
-        g.maxDiff = Math.max(g.maxDiff,p.diff);
-        g.typeCount[p.type] = (g.typeCount[p.type]||0)+1;
-        g.avgX += (p.x - g.avgX)/g.count;
-        g.avgY += (p.y - g.avgY)/g.count;
-        g.avgZ += (p.z - g.avgZ)/g.count;
-      }
-    });
-    displayData = groups;
-  } else {
-    // 特定セッション → グループ化せず個別表示
-    displayData = data;
-  }
-
-  map.setView([displayData[0].lat,displayData[0].lng],16);
-
-  displayData.forEach(p=>{
-    let type = "curve";
-    if(selectedSession==="all"){
-      const ratio=(p.typeCount.step||0)/p.count;
-      if(ratio>=level) type="step";
-    } else {
-      type = p.type;
     }
-    const color = markerColor(type);
 
-    const m = L.circleMarker([p.lat,p.lng],{
+    if(!g){
+      groups.push({
+        lat:p.lat, lng:p.lng, avgZ:p.z, count:1,
+        sumDiff:p.diff, maxDiff:p.diff, typeCount:{[p.type]:1},
+        samples:[p]  // 元データを保持
+      });
+    } else {
+      g.count++;
+      g.sumDiff += p.diff;
+      g.maxDiff = Math.max(g.maxDiff,p.diff);
+      g.typeCount[p.type] = (g.typeCount[p.type]||0)+1;
+      g.avgZ = g.avgZ + (p.z - g.avgZ)/g.count;
+      g.samples.push(p);
+    }
+  });
+
+  map.setView([groups[0].lat,groups[0].lng],16);
+
+  groups.forEach(g=>{
+    let type="curve", color="blue";
+    const ratio=(g.typeCount.step||0)/g.count;
+
+    if(ratio>=level){
+      type="step"; color="red";
+    } else {
+      type="curve"; color="blue";
+    }
+
+    const m = L.circleMarker([g.lat,g.lng],{
       radius:8, color, fillColor: color, fillOpacity:0.7
     }).addTo(map);
 
     function popupHTML(activeLabel=null){
       return `
         <b>${type==="step"?"段差":"カーブ"}</b><br>
-        ${selectedSession==="all"?`検出数：${p.count}<br>平均diff：${(p.sumDiff/p.count).toFixed(2)}<br>最大diff：${p.maxDiff.toFixed(2)}<br><br>`:''}
+        検出数：${g.count}<br>
+        平均diff：${(g.sumDiff/g.count).toFixed(2)}<br>
+        最大diff：${g.maxDiff.toFixed(2)}<br><br>
+
         <b>正解ラベル</b><br>
         <button class="label-btn step ${activeLabel==="step"?"active step":""}">段差</button>
         <button class="label-btn curve ${activeLabel==="curve"?"active curve":""}">カーブ</button>
         <button class="label-btn flat ${activeLabel==="flat"?"active flat":""}">平地</button><br><br>
-        <a href="detail.html?lat=${p.lat}&lng=${p.lng}" target="_blank">詳細データを見る</a>
+
+        <a href="detail.html?lat=${g.lat}&lng=${g.lng}" target="_blank">詳細データを見る</a>
       `;
     }
 
@@ -213,19 +260,19 @@ function draw(){
           m.setStyle({ color: markerColor(label), fillColor: markerColor(label) });
           m.setPopupContent(popupHTML(label));
 
-          // Firebase に元データをそのまま保存
+          // Firestore に送信（元データ xyz 付き）
           await addDoc(collection(db,"labels"),{
-            lat: p.lat,
-            lng: p.lng,
-            label_true: label,
-            type_detected: p.type,
-            diff: p.diff,
-            x: p.x,
-            y: p.y,
-            z: p.z,
-            angleDiff: p.angleDiff,
-            sessionId: p.sessionId,
-            updatedAt: new Date().toISOString()
+            lat:g.lat,
+            lng:g.lng,
+            label_true:label,
+            type_detected:type,
+            avgDiff:g.sumDiff/g.count,
+            maxDiff:g.maxDiff,
+            sessionId:selectedSession,
+            updatedAt:new Date().toISOString(),
+            samples: g.samples.map(s=>({
+              x: s.x, y: s.y, z: s.z, diff: s.diff
+            }))
           });
         };
       });
