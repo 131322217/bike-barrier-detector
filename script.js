@@ -16,9 +16,10 @@ const statusText = document.getElementById("statusText");
 const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
-/* ===== 設定 ===== */
-const STEP_DIFF = 50;
-const Z_THRESHOLD = 15;
+/* ===== 設定（データ収集用に低め） ===== */
+const STEP_DIFF = 30;
+const Z_THRESHOLD = 5;
+const ANGLE_THRESHOLD = 10;
 const DISTANCE_FILTER_M = 5;
 const PRE_N = 3;
 const EVENT_COOLDOWN = 1500;
@@ -98,14 +99,23 @@ function handleMotion(e){
       dx*dx + dy*dy + (dz*2)*(dz*2)
     );
 
+    /* ===== 角度差計算（常に） ===== */
+    let angleDiff = 0;
+    if (posHistory.length >= 3) {
+      const a1 = getAngle(posHistory[0], posHistory[1]);
+      const a2 = getAngle(posHistory[1], posHistory[2]);
+      angleDiff = Math.abs(a2 - a1);
+    }
+
     accelerationText.textContent =
-      `diff=${diff.toFixed(2)} dz=${dz.toFixed(2)}`;
+      `diff=${diff.toFixed(2)} dz=${dz.toFixed(2)} angle=${angleDiff.toFixed(1)}`;
 
     const sample = {
       x: parseFloat(curr.x.toFixed(2)),
       y: parseFloat(curr.y.toFixed(2)),
       z: parseFloat(curr.z.toFixed(2)),
       diff: parseFloat(diff.toFixed(2)),
+      angleDiff: parseFloat(angleDiff.toFixed(2)),
       lat: lastPosition.latitude,
       lng: lastPosition.longitude,
       timestamp: new Date().toISOString(),
@@ -132,39 +142,25 @@ function handleMotion(e){
     /* ===== 判定ロジック ===== */
     if (diff > STEP_DIFF) {
 
-      let isCurve = false;
-      let angleDiff = 0;
+      const isCurve = angleDiff > ANGLE_THRESHOLD;
 
-      if (posHistory.length >= 3) {
-        const a1 = getAngle(posHistory[0], posHistory[1]);
-        const a2 = getAngle(posHistory[1], posHistory[2]);
-        angleDiff = Math.abs(a2 - a1);
-        if (angleDiff > 15) isCurve = true;
-      }
-
-      // --- 段差 ---
       if (dz > Z_THRESHOLD) {
         sample.type = "step";
         logUI("段差検出");
-
         L.marker([sample.lat, sample.lng], {
           icon: L.divIcon({ html:"🔴", iconSize:[16,16], iconAnchor:[8,16] })
         }).addTo(map);
 
-      // --- カーブ ---
       } else if (isCurve) {
         sample.type = "curve";
         logUI("カーブ検出");
-
         L.marker([sample.lat, sample.lng], {
           icon: L.divIcon({ html:"🔵", iconSize:[16,16], iconAnchor:[8,16] })
         }).addTo(map);
 
-      // --- 段差候補 ---
       } else {
         sample.type = "candidate";
         logUI("段差候補");
-
         L.marker([sample.lat, sample.lng], {
           icon: L.divIcon({ html:"🟡", iconSize:[16,16], iconAnchor:[8,16] })
         }).addTo(map);
