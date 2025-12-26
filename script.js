@@ -134,10 +134,15 @@ function handleMotion(e){
       saveEvent(recentSamples.slice(-PRE_N));
 
       L.marker([sample.lat, sample.lng], {
-        icon: L.divIcon({ html:"📍", iconSize:[16,16], iconAnchor:[8,16] })
-      }).addTo(map)
-        .bindPopup(`段差<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
-
+          icon: L.divIcon({
+    html: "🔴",
+    className: "",   // ← これを追加
+    iconSize: [16,16],
+    iconAnchor: [8,16]
+  })
+})
+.addTo(map)
+.bindPopup(`段差<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
       eventMarkers.push({ lat: sample.lat, lng: sample.lng });
       logUI("段差検出");
     }
@@ -151,9 +156,15 @@ function handleMotion(e){
       saveEvent(recentSamples.slice(-PRE_N));
 
       L.marker([sample.lat, sample.lng], {
-        icon: L.divIcon({ html:"📍", iconSize:[16,16], iconAnchor:[8,16] })
-      }).addTo(map)
-        .bindPopup(`カーブ<br>diff=${diff.toFixed(1)}`);
+          icon: L.divIcon({
+    html: "🔵",
+    className: "",   // ← これを追加
+    iconSize: [16,16],
+    iconAnchor: [8,16]
+  })
+})
+.addTo(map)
+.bindPopup(`カーブ<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
 
       eventMarkers.push({ lat: sample.lat, lng: sample.lng });
       logUI("カーブ検出");

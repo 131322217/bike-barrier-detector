@@ -1,67 +1,85 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>Barrier Map</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<meta charset="UTF-8">
+<title>Barrier Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
 
-  <style>
-    html, body { height: 100%; margin: 0; }
-    #map { width: 100%; height: 100%; }
+<style>
+html, body { height:100%; margin:0; }
+#map { width:100%; height:100%; }
 
-    .panel {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: white;
-      padding: 8px;
-      border-radius: 8px;
-      font-size: 13px;
-      box-shadow: 0 0 6px rgba(0,0,0,0.2);
-      z-index: 1000;
-    }
+.panel {
+  position:absolute;
+  top:10px; left:10px;
+  background:white;
+  padding:8px;
+  border-radius:8px;
+  box-shadow:0 0 6px rgba(0,0,0,.2);
+  z-index:1000;
+  width:210px;
+}
 
-    .panel button, .panel select {
-      margin: 3px 0;
-      padding: 4px 6px;
-      width: 100%;
-    }
+.panel-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-weight:bold;
+}
 
-    .active {
-      background: #007bff;
-      color: white;
-      font-weight: bold;
-    }
+.panel-body {
+  margin-top:6px;
+}
 
-    .legend { margin-top: 6px; font-size: 12px; }
-    .box { width:12px; height:12px; display:inline-block; border-radius:50%; margin-right:4px; }
-  </style>
+.hidden {
+  display:none;
+}
+
+button, select {
+  width:100%;
+  margin-top:4px;
+}
+
+.levelBtn.active {
+  background:#007bff;
+  color:white;
+}
+
+.legend { font-size:12px; margin-top:6px; }
+.box { width:12px; height:12px; display:inline-block; border-radius:50%; margin-right:4px; }
+</style>
 </head>
 <body>
 
 <div id="map"></div>
 
 <div class="panel">
-  <b>セッション</b>
-  <select id="sessionSelect"></select>
+  <div class="panel-header">
+    <span>表示設定</span>
+    <button id="toggleBtn">▼</button>
+  </div>
 
-  <hr>
+  <div class="panel-body" id="panelBody">
+    <b>セッション</b>
+    <select id="sessionSelect"></select>
 
-  <b>表示</b><br>
-  <label><input type="checkbox" id="showStep" checked> 段差</label><br>
-  <label><input type="checkbox" id="showCurve" checked> カーブ</label>
+    <hr>
 
-  <hr>
+    <label><input type="checkbox" id="showStep" checked> 段差</label><br>
+    <label><input type="checkbox" id="showCurve" checked> カーブ</label>
 
-  <b>段差信頼度</b><br>
-  <button class="levelBtn" data-level="0.6">6割</button>
-  <button class="levelBtn active" data-level="0.7">7割</button>
-  <button class="levelBtn" data-level="0.8">8割</button>
+    <hr>
 
-  <div class="legend">
-    <div><span class="box" style="background:red"></span>段差</div>
-    <div><span class="box" style="background:blue"></span>カーブ</div>
+    <b>段差信頼度</b>
+    <button class="levelBtn" data-level="0.6">6割</button>
+    <button class="levelBtn active" data-level="0.7">7割</button>
+    <button class="levelBtn" data-level="0.8">8割</button>
+
+    <div class="legend">
+      <div><span class="box" style="background:red"></span>段差</div>
+      <div><span class="box" style="background:blue"></span>カーブ</div>
+    </div>
   </div>
 </div>
 
@@ -79,56 +97,73 @@ const db = getFirestore(app);
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let allData = [];
-let markers = [];
-let selectedSession = "all";
-let level = 0.7;
+let allData=[], markers=[];
+let selectedSession="all";
+let level=0.7;
 
-/* ===== util ===== */
-function distanceMeters(a,b,c,d){
+/* ========== UI ========== */
+document.getElementById("toggleBtn").onclick=()=>{
+  document.getElementById("panelBody").classList.toggle("hidden");
+};
+
+document.getElementById("showStep").onchange=draw;
+document.getElementById("showCurve").onchange=draw;
+
+document.querySelectorAll(".levelBtn").forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll(".levelBtn").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    level=parseFloat(b.dataset.level);
+    draw();
+  };
+});
+
+document.getElementById("sessionSelect").onchange=e=>{
+  selectedSession=e.target.value;
+  draw();
+};
+
+/* ========== util ========== */
+function distance(a,b,c,d){
   const R=6371000;
   const dLat=(c-a)*Math.PI/180;
   const dLng=(d-b)*Math.PI/180;
-  const x=Math.sin(dLat/2)**2+
-    Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLng/2)**2;
-  return 2*R*Math.asin(Math.sqrt(x));
+  return 2*R*Math.asin(Math.sqrt(
+    Math.sin(dLat/2)**2 +
+    Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLng/2)**2
+  ));
 }
 
-/* ===== load ===== */
-async function loadData(){
-  const snap = await getDocs(collection(db,"raw_sessions"));
+/* ========== data ========== */
+async function load(){
+  const snap=await getDocs(collection(db,"raw_sessions"));
   const arr=[];
   snap.forEach(d=>{
     d.data().logs?.forEach(l=>{
-      if(l.isEvent){
-        arr.push({...l, sessionId:d.data().sessionId});
-      }
+      if(l.isEvent) arr.push({...l, sessionId:d.data().sessionId});
     });
   });
   return arr;
 }
 
-/* ===== draw ===== */
+/* ========== draw ========== */
 function draw(){
   markers.forEach(m=>map.removeLayer(m));
   markers=[];
 
-  let data = allData.filter(d =>
+  let data=allData.filter(d =>
     selectedSession==="all" || d.sessionId===selectedSession
   );
 
-  if(!document.getElementById("showStep").checked)
-    data = data.filter(d=>d.type!=="step");
-
-  if(!document.getElementById("showCurve").checked)
-    data = data.filter(d=>d.type!=="curve");
+  if(!showStep.checked) data=data.filter(d=>d.type!=="step");
+  if(!showCurve.checked) data=data.filter(d=>d.type!=="curve");
 
   if(data.length===0) return;
 
   const groups=[];
 
   data.forEach(p=>{
-    let g=groups.find(g=>distanceMeters(p.lat,p.lng,g.lat,g.lng)<5);
+    let g=groups.find(g=>distance(p.lat,p.lng,g.lat,g.lng)<5);
     if(!g){
       groups.push({
         lat:p.lat,lng:p.lng,
@@ -156,41 +191,26 @@ function draw(){
       radius:8,color,fillColor:color,fillOpacity:0.7
     }).addTo(map);
 
+    m.bindPopup(`
+      <b>${type==="step"?"段差":"カーブ"}</b><br>
+      回数: ${g.count}<br>
+      平均diff: ${(g.sumDiff/g.count).toFixed(2)}<br>
+      最大diff: ${g.maxDiff.toFixed(2)}
+    `);
+
     markers.push(m);
   });
 }
 
-/* ===== UI ===== */
-document.getElementById("showStep").onchange = draw;
-document.getElementById("showCurve").onchange = draw;
-
-document.querySelectorAll(".levelBtn").forEach(btn=>{
-  btn.onclick=()=>{
-    document.querySelectorAll(".levelBtn").forEach(b=>b.classList.remove("active"));
-    btn.classList.add("active");
-    level=parseFloat(btn.dataset.level);
-    draw();
-  };
-});
-
-document.getElementById("sessionSelect").onchange=e=>{
-  selectedSession=e.target.value;
-  draw();
-};
-
-/* ===== init ===== */
-allData = await loadData();
-const sessions=[...new Set(allData.map(d=>d.sessionId))];
-
+/* init */
+allData = await load();
 const sel=document.getElementById("sessionSelect");
 sel.innerHTML='<option value="all">すべて</option>';
-sessions.forEach(s=>{
+[...new Set(allData.map(d=>d.sessionId))].forEach(s=>{
   const o=document.createElement("option");
-  o.value=s;
-  o.textContent=s;
+  o.value=s; o.textContent=s;
   sel.appendChild(o);
 });
-
 draw();
 </script>
 </body>
