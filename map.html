@@ -10,6 +10,24 @@
 html, body { height:100%; margin:0; }
 #map { width:100%; height:100%; }
 
+/* ===== panel ===== */
+.panel {
+  position:absolute;
+  top:10px; left:10px;
+  background:white;
+  padding:8px;
+  border-radius:8px;
+  box-shadow:0 0 6px rgba(0,0,0,.2);
+  z-index:1000;
+  width:220px;
+}
+.panel-header {
+  font-weight:bold;
+  margin-bottom:6px;
+}
+select { width:100%; }
+
+/* ===== label buttons ===== */
 .label-btn {
   margin:4px 2px;
   padding:4px 8px;
@@ -25,6 +43,11 @@ html, body { height:100%; margin:0; }
 <body>
 
 <div id="map"></div>
+
+<div class="panel">
+  <div class="panel-header">セッション選択</div>
+  <select id="sessionSelect"></select>
+</div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script type="module">
@@ -65,119 +88,154 @@ function markerColor(label){
   return "#333";
 }
 
-/* ===== load raw events ===== */
-async function loadEvents(){
+/* ===== load ===== */
+async function loadSessions(){
   const snap = await getDocs(collection(db,"raw_sessions"));
-  const arr = [];
+  const sessions = [];
   snap.forEach(d=>{
-    d.data().logs?.forEach(l=>{
-      if(l.isEvent) arr.push(l);
-    });
+    const s = d.data();
+    if(s.logs){
+      sessions.push({
+        sessionId: s.sessionId,
+        logs: s.logs.filter(l=>l.isEvent)
+      });
+    }
   });
-  return arr;
+  return sessions;
 }
 
-/* ===== main ===== */
-const raw = await loadEvents();
+/* ===== UI ===== */
+const sessionSelect = document.getElementById("sessionSelect");
 
-/* --- グルーピング --- */
-const groups = [];
-raw.forEach(p=>{
-  let g = groups.find(g =>
-    distance(p.lat,p.lng,g.lat,g.lng) < 6 &&
-    Math.abs(p.z - g.avgZ) < 2
-  );
+/* ===== draw ===== */
+let markers = [];
 
-  if(!g){
-    groups.push({
-      lat:p.lat,
-      lng:p.lng,
-      count:1,
-      avgZ:p.z,
-      maxDiff:p.diff,
-      maxAngle:p.angleDiff,
-      typeCount:{ [p.type]:1 }
-    });
-  }else{
-    g.count++;
-    g.avgZ += (p.z - g.avgZ)/g.count;
-    g.maxDiff = Math.max(g.maxDiff, p.diff);
-    g.maxAngle = Math.max(g.maxAngle, p.angleDiff);
-    g.typeCount[p.type]=(g.typeCount[p.type]||0)+1;
-  }
-});
-
-/* --- 機械判定 --- */
-function detectedType(g){
-  if((g.typeCount.step||0)/g.count >= 0.6) return "step";
-  if((g.typeCount.curve||0)>0) return "curve";
-  return "candidate";
+function clearMarkers(){
+  markers.forEach(m=>map.removeLayer(m));
+  markers = [];
 }
 
-map.setView([groups[0].lat,groups[0].lng],16);
+function draw(session){
+  clearMarkers();
+  if(session.logs.length === 0) return;
 
-/* --- マーカー --- */
-groups.forEach(g=>{
-  const detected = detectedType(g);
-  let currentLabel = null;
+  /* --- グルーピング --- */
+  const groups = [];
+  session.logs.forEach(p=>{
+    let g = groups.find(g =>
+      distance(p.lat,p.lng,g.lat,g.lng) < 6 &&
+      Math.abs(p.z - g.avgZ) < 2
+    );
 
-  const marker = L.circleMarker([g.lat,g.lng],{
-    radius:8,
-    color:"#333",
-    fillColor:"#333",
-    fillOpacity:0.7
-  }).addTo(map);
+    if(!g){
+      groups.push({
+        lat:p.lat,
+        lng:p.lng,
+        count:1,
+        avgZ:p.z,
+        maxDiff:p.diff,
+        maxAngle:p.angleDiff,
+        typeCount:{ [p.type]:1 }
+      });
+    }else{
+      g.count++;
+      g.avgZ += (p.z - g.avgZ)/g.count;
+      g.maxDiff = Math.max(g.maxDiff, p.diff);
+      g.maxAngle = Math.max(g.maxAngle, p.angleDiff);
+      g.typeCount[p.type]=(g.typeCount[p.type]||0)+1;
+    }
+  });
 
-  function popupHTML(active){
-    return `
-      <b>機械判定：</b>${detected}<br>
-      diff最大：${g.maxDiff.toFixed(1)}<br>
-      z平均：${g.avgZ.toFixed(1)}<br>
-      angle最大：${g.maxAngle.toFixed(1)}<br><br>
-
-      <b>正解ラベル</b><br>
-      <button class="label-btn step ${active==="step"?"active step":""}">段差</button>
-      <button class="label-btn curve ${active==="curve"?"active curve":""}">カーブ</button>
-      <button class="label-btn flat ${active==="flat"?"active flat":""}">平地</button>
-    `;
+  function detectedType(g){
+    if((g.typeCount.step||0)/g.count >= 0.6) return "step";
+    if((g.typeCount.curve||0)>0) return "curve";
+    return "flat";
   }
 
-  marker.bindPopup(popupHTML(null));
+  map.setView([groups[0].lat,groups[0].lng],16);
 
-  marker.on("popupopen", e=>{
-    const el = e.popup.getElement();
-    el.querySelectorAll(".label-btn").forEach(btn=>{
-      btn.onclick = async ()=>{
-        const label =
-          btn.classList.contains("step") ? "step" :
-          btn.classList.contains("curve") ? "curve" : "flat";
+  groups.forEach(g=>{
+    const detected = detectedType(g);
+    let currentLabel = null;
 
-        const newLabel = (label===currentLabel) ? null : label;
-        currentLabel = newLabel;
+    const marker = L.circleMarker([g.lat,g.lng],{
+      radius:8,
+      color:"#333",
+      fillColor:"#333",
+      fillOpacity:0.7
+    }).addTo(map);
 
-        marker.setStyle({
-          color: markerColor(newLabel),
-          fillColor: markerColor(newLabel)
-        });
+    function popupHTML(active){
+      return `
+        <b>機械判定：</b>${detected}<br>
+        diff最大：${g.maxDiff.toFixed(1)}<br>
+        z平均：${g.avgZ.toFixed(1)}<br>
+        angle最大：${g.maxAngle.toFixed(1)}<br><br>
 
-        marker.setPopupContent(popupHTML(newLabel));
+        <b>正解ラベル</b><br>
+        <button class="label-btn step ${active==="step"?"active step":""}">段差</button>
+        <button class="label-btn curve ${active==="curve"?"active curve":""}">カーブ</button>
+        <button class="label-btn flat ${active==="flat"?"active flat":""}">平地</button>
+      `;
+    }
 
-        if(newLabel){
-          await addDoc(collection(db,"labels"),{
-            lat:g.lat,
-            lng:g.lng,
-            label_true:newLabel,
-            type_detected:detected,
-            diff:g.maxDiff,
-            z:g.avgZ,
-            angleDiff:g.maxAngle,
-            updatedAt:new Date().toISOString()
+    marker.bindPopup(popupHTML(null));
+
+    marker.on("popupopen", e=>{
+      const el = e.popup.getElement();
+      el.querySelectorAll(".label-btn").forEach(btn=>{
+        btn.onclick = async ()=>{
+          const label =
+            btn.classList.contains("step") ? "step" :
+            btn.classList.contains("curve") ? "curve" : "flat";
+
+          const newLabel = (label===currentLabel) ? null : label;
+          currentLabel = newLabel;
+
+          marker.setStyle({
+            color: markerColor(newLabel),
+            fillColor: markerColor(newLabel)
           });
-        }
-      };
+
+          marker.setPopupContent(popupHTML(newLabel));
+
+          if(newLabel){
+            await addDoc(collection(db,"labels"),{
+              lat:g.lat,
+              lng:g.lng,
+              label_true:newLabel,
+              type_detected:detected,
+              diff:g.maxDiff,
+              z:g.avgZ,
+              angleDiff:g.maxAngle,
+              sessionId: session.sessionId,
+              updatedAt:new Date().toISOString()
+            });
+          }
+        };
+      });
     });
+
+    markers.push(marker);
   });
+}
+
+/* ===== init ===== */
+const sessions = await loadSessions();
+
+sessionSelect.innerHTML = "";
+sessions.forEach((s,i)=>{
+  const o = document.createElement("option");
+  o.value = i;
+  o.textContent = s.sessionId;
+  sessionSelect.appendChild(o);
 });
+
+sessionSelect.onchange = e => {
+  draw(sessions[e.target.value]);
+};
+
+draw(sessions[0]);
 </script>
 </body>
 </html>
