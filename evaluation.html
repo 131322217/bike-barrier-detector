@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>評価グラフ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  font-family: sans-serif;
+  margin: 20px;
+}
+h2 { margin-top: 40px; }
+canvas {
+  max-width: 800px;
+  margin-bottom: 40px;
+}
+</style>
+</head>
+<body>
+
+<h1>段差検出アルゴリズム 評価</h1>
+
+<h2>① 混同行列</h2>
+<canvas id="confusionChart"></canvas>
+
+<h2>② diff 分布（正解ラベル別）</h2>
+<canvas id="diffChart"></canvas>
+
+<h2>③ z 分布（正解ラベル別）</h2>
+<canvas id="zChart"></canvas>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  projectId: "bike-barrier-detector-1e128"
+});
+const db = getFirestore(app);
+
+/* ===== load labels ===== */
+const snap = await getDocs(collection(db,"event_labels"));
+const data = [];
+snap.forEach(d => data.push(d.data()));
+
+/* ===== 混同行列 ===== */
+const labels = ["step","curve","none"];
+const matrix = {
+  step: {step:0, curve:0, none:0},
+  curve:{step:0, curve:0, none:0},
+  none: {step:0, curve:0, none:0}
+};
+
+data.forEach(d=>{
+  matrix[d.type_detected][d.type_true]++;
+});
+
+new Chart(document.getElementById("confusionChart"),{
+  type:"bar",
+  data:{
+    labels,
+    datasets:labels.map(l=>({
+      label:`正解:${l}`,
+      data:labels.map(x=>matrix[x][l])
+    }))
+  },
+  options:{ responsive:true }
+});
+
+/* ===== 分布用データ ===== */
+function group(key){
+  return labels.map(l=>({
+    label:l,
+    data:data.filter(d=>d.type_true===l).map(d=>d[key])
+  }));
+}
+
+/* ===== diff ===== */
+new Chart(document.getElementById("diffChart"),{
+  type:"boxplot",
+  data:{
+    labels,
+    datasets:group("diff")
+  }
+});
+
+/* ===== z ===== */
+new Chart(document.getElementById("zChart"),{
+  type:"boxplot",
+  data:{
+    labels,
+    datasets:group("z")
+  }
+});
+</script>
+
+</body>
+</html>
