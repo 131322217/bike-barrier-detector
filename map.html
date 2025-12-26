@@ -18,7 +18,7 @@ html, body { height:100%; margin:0; }
   border-radius:8px;
   box-shadow:0 0 6px rgba(0,0,0,.2);
   z-index:1000;
-  width:220px;
+  width:210px;
 }
 
 .panel-header {
@@ -55,6 +55,11 @@ button, select {
   box-shadow:0 0 8px rgba(0,0,0,.3);
   font-weight:bold;
   display:none;
+}
+
+.popup-btn {
+  width:100%;
+  margin-top:4px;
 }
 </style>
 </head>
@@ -97,31 +102,22 @@ button, select {
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import {
-  getFirestore,
-  collection,
-  getDocs,
-  addDoc
-} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-/* ===== Firebase ===== */
 const app = initializeApp({
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
-/* ===== Map ===== */
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-/* ===== State ===== */
-let allData = [];
-let markers = [];
+let allData = [], markers = [];
 let selectedSession = "all";
 let level = 0.7;
 
-/* ===== UI ===== */
+/* UI */
 const showStep = document.getElementById("showStep");
 const showCurve = document.getElementById("showCurve");
 const showCandidate = document.getElementById("showCandidate");
@@ -147,7 +143,7 @@ document.getElementById("sessionSelect").onchange = e => {
 
 showStep.onchange = showCurve.onchange = showCandidate.onchange = draw;
 
-/* ===== util ===== */
+/* util */
 function distance(a,b,c,d){
   const R=6371000;
   const dLat=(c-a)*Math.PI/180;
@@ -158,41 +154,35 @@ function distance(a,b,c,d){
   ));
 }
 
-/* ===== load ===== */
+/* ★ 人力正解保存 */
+window.saveTrueLabel = async (g, typeTrue) => {
+  await addDoc(collection(db,"event_labels"),{
+    sessionId: g.sessionId,
+    lat: g.lat,
+    lng: g.lng,
+    type_detected: g.type,
+    type_true: typeTrue,
+    count: g.count,
+    avgDiff: g.sumDiff / g.count,
+    maxDiff: g.maxDiff,
+    labeledAt: new Date().toISOString()
+  });
+  alert("正解を保存しました");
+};
+
+/* load */
 async function load(){
   const snap = await getDocs(collection(db,"raw_sessions"));
   const arr = [];
   snap.forEach(d=>{
     d.data().logs?.forEach(l=>{
-      if(l.isEvent){
-        arr.push({
-          ...l,
-          sessionId: d.data().sessionId
-        });
-      }
+      if(l.isEvent) arr.push({...l, sessionId:d.data().sessionId});
     });
   });
   return arr;
 }
 
-/* ===== 正解ラベル保存 ===== */
-window.saveTrueLabel = async (index, typeTrue) => {
-  const p = allData[index];
-  await addDoc(collection(db,"event_labels"),{
-    sessionId: p.sessionId,
-    lat: p.lat,
-    lng: p.lng,
-    timestamp: p.timestamp,
-    type_detected: p.type,
-    type_true: typeTrue,
-    diff: p.diff,
-    z: p.z,
-    labeledAt: new Date().toISOString()
-  });
-  alert("正解ラベルを保存しました");
-};
-
-/* ===== draw ===== */
+/* draw */
 function draw(){
   markers.forEach(m=>map.removeLayer(m));
   markers = [];
@@ -212,38 +202,69 @@ function draw(){
     noDataBox.style.display = "none";
   }
 
-  map.setView([data[0].lat,data[0].lng],16);
+  const groups = [];
 
-  data.forEach((p,i)=>{
-    let color="blue";
-    if(p.type==="step") color="red";
-    if(p.type==="candidate") color="yellow";
+  data.forEach(p => {
+    let g = groups.find(g => {
+      const d = distance(p.lat, p.lng, g.lat, g.lng);
+      const dz = Math.abs(p.z - g.avgZ || 0);
+      return d < 5 || (d < 15 && dz < 1.0);
+    });
 
-    const m = L.circleMarker([p.lat,p.lng],{
-      radius:8,
-      color,
-      fillColor:color,
-      fillOpacity:0.7
+    if (!g) {
+      groups.push({
+        lat: p.lat,
+        lng: p.lng,
+        avgZ: p.z,
+        count: 1,
+        sumDiff: p.diff,
+        maxDiff: p.diff,
+        typeCount: { [p.type]: 1 },
+        sessionId: p.sessionId
+      });
+    } else {
+      g.count++;
+      g.sumDiff += p.diff;
+      g.maxDiff = Math.max(g.maxDiff, p.diff);
+      g.typeCount[p.type] = (g.typeCount[p.type] || 0) + 1;
+      g.avgZ = g.avgZ + (p.z - g.avgZ) / g.count;
+    }
+  });
+
+  map.setView([groups[0].lat,groups[0].lng],16);
+
+  groups.forEach(g=>{
+    let type="curve", color="blue";
+    const ratio=(g.typeCount.step||0)/g.count;
+
+    if(ratio>=level){
+      type="step"; color="red";
+    } else if((g.typeCount.candidate||0)>0){
+      type="candidate"; color="yellow";
+    }
+
+    g.type = type; // ★ 保存用
+
+    const m=L.circleMarker([g.lat,g.lng],{
+      radius:8,color,fillColor:color,fillOpacity:0.7
     }).addTo(map);
 
     m.bindPopup(`
-      <b>${type==="step"?"段差":type==="curve"?"カーブ":"段差候補"}</b><br> 
-      検出数：${g.count}<br> 
-      平均diff：${(g.sumDiff/g.count).toFixed(2)}<br> 
-      最大diff：${g.maxDiff.toFixed(2)}<br> 
-      <a href="detail.html?lat=${g.lat}&lng=${g.lng}" target="_blank">詳細データを見る</a><br>
-      <hr>
-      <b>正解を入力</b><br>
-      <button onclick="saveTrueLabel(${i}, 'step')">段差</button>
-      <button onclick="saveTrueLabel(${i}, 'curve')">カーブ</button>
-      <button onclick="saveTrueLabel(${i}, 'none')">平地</button>
+      <b>${type==="step"?"段差":type==="curve"?"カーブ":"段差候補"}</b><br>
+      検出数：${g.count}<br>
+      平均diff：${(g.sumDiff/g.count).toFixed(2)}<br>
+      最大diff：${g.maxDiff.toFixed(2)}<br><hr>
+      <b>正解を選択</b><br>
+      <button class="popup-btn" onclick="saveTrueLabel(${JSON.stringify(g)}, 'step')">段差</button>
+      <button class="popup-btn" onclick="saveTrueLabel(${JSON.stringify(g)}, 'curve')">カーブ</button>
+      <button class="popup-btn" onclick="saveTrueLabel(${JSON.stringify(g)}, 'none')">誤検出</button>
     `);
 
     markers.push(m);
   });
 }
 
-/* ===== init ===== */
+/* init */
 allData = await load();
 
 const sel=document.getElementById("sessionSelect");
