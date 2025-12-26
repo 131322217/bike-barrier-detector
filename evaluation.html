@@ -2,19 +2,19 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>散布図切替</title>
+<title>散布図切替（Plotly版）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.25.2.min.js"></script>
 <style>
 body { font-family: sans-serif; margin:20px; text-align:center; }
-canvas { max-width:900px; margin:20px auto; display:block; }
+#scatterPlot { width:90%; max-width:1000px; height:600px; margin:20px auto; }
 button { margin:5px; padding:6px 12px; border-radius:4px; cursor:pointer; }
 </style>
 </head>
 <body>
 
-<h1>散布図切替（密度反映）</h1>
-<canvas id="scatterChart"></canvas>
+<h1>散布図切替（Plotly版）</h1>
+<div id="scatterPlot"></div>
 
 <div>
   <button data-x="diff" data-y="angleDiff">diff × angleDiff</button>
@@ -41,7 +41,7 @@ const db = getFirestore(app);
 /* ラベル定義 */
 const KEYS = ["step","curve","flat"];
 const LABEL = { step:"段差", curve:"カーブ", flat:"カーブ+段差" };
-const COLOR = { step:"rgba(220,38,38,0.7)", curve:"rgba(37,99,235,0.7)", flat:"rgba(34,197,94,0.7)" };
+const COLOR = { step:"red", curve:"blue", flat:"green" };
 
 /* データ取得 */
 const snap = await getDocs(collection(db,"labels"));
@@ -49,81 +49,62 @@ let rows = [];
 snap.docs.forEach(d => {
   const r = d.data();
   if(r.samples?.length){
-    r.samples.forEach(s => {
-      rows.push({
-        ...r,
-        ...s,
-        xyMean: (typeof s.x==="number" && typeof s.y==="number") ? (Math.abs(s.x)+Math.abs(s.y))/2 : null
-      });
+    r.samples.forEach(s=>{
+      rows.push({...r,...s, xyMean:(Math.abs(s.x)+Math.abs(s.y))/2});
     });
   } else {
-    rows.push({
-      ...r,
-      xyMean: (typeof r.x==="number" && typeof r.y==="number") ? (Math.abs(r.x)+Math.abs(r.y))/2 : null
-    });
+    rows.push({...r, xyMean:(Math.abs(r.x)+Math.abs(r.y))/2});
   }
 });
-if(rows.length === 0) alert("labels にデータがありません");
 
-/* 高解像度対応 */
-const canvas = document.getElementById("scatterChart");
-const ctx = canvas.getContext("2d");
-canvas.width = canvas.clientWidth * window.devicePixelRatio;
-canvas.height = canvas.clientHeight * window.devicePixelRatio;
-ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+if(rows.length===0) alert("labels にデータがありません");
 
-let chart;
-
-// 点の密度に応じて半径を決める
-function calcRadius(x, y, allRows) {
-  const count = allRows.filter(r => Math.abs(r[xField]-x)<0.05 && Math.abs(r[yField]-y)<0.05).length;
-  return 3 + count * 1.5; // 最小3px、重なりごとに大きく
-}
-
-// 散布図描画
+/* Plotly用描画関数 */
 function drawScatter(xField, yField){
-  const datasets = KEYS.map(k => ({
-    label: LABEL[k],
-    backgroundColor: COLOR[k],
-    data: rows
-      .filter(r => r.label_true===k && typeof r[xField]==="number" && typeof r[yField]==="number")
-      .map(r => ({ x: r[xField], y: r[yField], r: 3 }))  // 半径はあとで調整
-  }));
+  const data = KEYS.map(k => {
+    const filtered = rows.filter(r => r.label_true===k && typeof r[xField]==="number" && typeof r[yField]==="number");
 
-  // 密度に応じて r を設定
-  datasets.forEach(ds => {
-    ds.data.forEach(p => {
-      const count = ds.data.filter(d => Math.abs(d.x - p.x)<0.05 && Math.abs(d.y - p.y)<0.05).length;
-      p.r = 3 + count*1.5;
+    // 重なりを大きさで表現する
+    const sizeMap = {};
+    filtered.forEach(r=>{
+      const key = `${r[xField]}_${r[yField]}`;
+      sizeMap[key] = (sizeMap[key]||0) + 1;
     });
+
+    return {
+      x: filtered.map(r=>r[xField]),
+      y: filtered.map(r=>r[yField]),
+      mode: 'markers',
+      type: 'scattergl', // 高速＆高解像度
+      name: LABEL[k],
+      marker: {
+        color: COLOR[k],
+        size: filtered.map(r=>{
+          const key = `${r[xField]}_${r[yField]}`;
+          return 5 + sizeMap[key]*2; // 重なりに応じてサイズ大きく
+        }),
+        opacity:0.7
+      }
+    };
   });
 
-  if(chart) chart.destroy();
-  chart = new Chart(ctx, {
-    type: 'bubble',
-    data: { datasets },
-    options: {
-      responsive:true,
-      plugins:{ legend:{ position:"top" } },
-      scales:{
-        x:{ title:{ display:true, text:xField } },
-        y:{ title:{ display:true, text:yField } }
-      }
-    }
-  });
+  const layout = {
+    xaxis: { title:xField },
+    yaxis: { title:yField },
+    legend:{ orientation:"h" },
+    margin:{ t:40, l:50, r:20, b:50 },
+    hovermode:"closest"
+  };
+
+  Plotly.newPlot('scatterPlot', data, layout, {responsive:true});
 }
 
 /* 初期表示 */
-let xField = "diff", yField = "angleDiff";
-drawScatter(xField, yField);
+drawScatter("diff","angleDiff");
 
 /* ボタン切替 */
 document.querySelectorAll("button").forEach(btn=>{
-  btn.onclick = ()=>{
-    xField = btn.dataset.x;
-    yField = btn.dataset.y;
-    drawScatter(xField, yField);
-  };
+  btn.onclick = ()=> drawScatter(btn.dataset.x, btn.dataset.y);
 });
 </script>
 
