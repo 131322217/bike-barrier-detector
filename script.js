@@ -34,11 +34,20 @@ let prevAcc = null;
 let recentSamples = [];
 let eventMarkers = [];
 let lastEventTime = 0;
+let posHistory = [];
+
 
 /* ===== Utility ===== */
 function logUI(msg){
   resultText.textContent = msg;
   console.log(msg);
+}
+
+function getAngle(p1, p2) {
+  return Math.atan2(
+    p2.lng - p1.lng,
+    p2.lat - p1.lat
+  ) * 180 / Math.PI;
 }
 
 function distanceMeters(lat1,lng1,lat2,lng2){
@@ -89,7 +98,12 @@ function handleMotion(e){
     const dx = Math.abs(curr.x - prevAcc.x);
     const dy = Math.abs(curr.y - prevAcc.y);
     const dz = Math.abs(curr.z - prevAcc.z);
-    const diff = dx + dy + 3 * dz;
+    const diff = Math.sqrt(
+      dx * dx +
+      dy * dy +
+      (dz * 2) * (dz * 2)
+    );
+
 
     accelerationText.textContent =
       `diff=${diff.toFixed(2)} dz=${dz.toFixed(2)}`;
@@ -148,7 +162,11 @@ function handleMotion(e){
     }
 
     /* ===== カーブ ===== */
-    else if (diff > CURVE_DIFF && dz <= Z_THRESHOLD) {
+    else if (posHistory.length >= 3) {
+  const a1 = getAngle(posHistory[0], posHistory[1]);
+  const a2 = getAngle(posHistory[1], posHistory[2]);
+  const angleDiff = Math.abs(a2 - a1);
+    if (angleDiff > 15 && diff > 20 && dz <= Z_THRESHOLD) {
       sample.isEvent = true;
       sample.type = "curve";
       lastEventTime = now;
@@ -157,21 +175,22 @@ function handleMotion(e){
 
       L.marker([sample.lat, sample.lng], {
           icon: L.divIcon({
-    html: "🔵",
-    className: "",   // ← これを追加
-    iconSize: [16,16],
-    iconAnchor: [8,16]
+      html: "🔵",
+      className: "",   // ← これを追加
+      iconSize: [16,16],
+      iconAnchor: [8,16]
+    })
   })
-})
-.addTo(map)
-.bindPopup(`カーブ<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
+  .addTo(map)
+  .bindPopup(`カーブ<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
 
-      eventMarkers.push({ lat: sample.lat, lng: sample.lng });
-      logUI("カーブ検出");
+        eventMarkers.push({ lat: sample.lat, lng: sample.lng });
+        logUI("カーブ検出");
+      }
     }
-  }
 
-  prevAcc = curr;
+    prevAcc = curr;
+  }
 }
 
 /* ===== GPS ===== */
@@ -180,6 +199,13 @@ function startGPS(){
     pos=>{
       lastPosition = pos.coords;
       updateMap(pos.coords.latitude, pos.coords.longitude);
+      posHistory.push({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        time: Date.now()
+      });
+
+  if (posHistory.length > 5) posHistory.shift();
       statusText.textContent = "測定中";
     },
     err=>{
