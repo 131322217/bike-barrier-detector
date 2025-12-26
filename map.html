@@ -192,10 +192,11 @@ function draw(){
     }).addTo(map);
 
     m.bindPopup(`
-      <b>${type==="step"?"段差":"カーブ"}</b><br>
-      回数: ${g.count}<br>
-      平均diff: ${(g.sumDiff/g.count).toFixed(2)}<br>
-      最大diff: ${g.maxDiff.toFixed(2)}
+    <b>${type==='step'?'段差':'カーブ'}</b><br> 
+    検出回数：${g.count} 回<br> 
+    平均 diff：${(g.sumDiff/g.count).toFixed(2)}<br>
+    最大 diff：${g.maxDiff.toFixed(2)}<br> 
+    <a href="detail.html?lat=${g.lat}&lng=${g.lng}" target="_blank">詳細データを見る</a> 
     `);
 
     markers.push(m);
