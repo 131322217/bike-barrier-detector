@@ -140,22 +140,21 @@ function handleMotion(e){
     }
 
     /* ===== 判定ロジック ===== */
-    if (diff > STEP_DIFF) {
+    if (diff >= STEP_DIFF) { // ここを diff>=30 に合わせる
 
-      const isCurve = angleDiff > ANGLE_THRESHOLD;
-
-      if (dz > Z_THRESHOLD) {
-        sample.type = "step";
-        logUI("段差検出");
-        L.marker([sample.lat, sample.lng], {
-          icon: L.divIcon({ html:"🔴", iconSize:[16,16], iconAnchor:[8,16] })
-        }).addTo(map);
-
-      } else if (isCurve) {
+      // angleDiff >=10ならカーブ
+      if (angleDiff >= ANGLE_THRESHOLD) {
         sample.type = "curve";
         logUI("カーブ検出");
         L.marker([sample.lat, sample.lng], {
           icon: L.divIcon({ html:"🔵", iconSize:[16,16], iconAnchor:[8,16] })
+        }).addTo(map);
+
+      } else if (dz > Z_THRESHOLD) {
+        sample.type = "step";
+        logUI("段差検出");
+        L.marker([sample.lat, sample.lng], {
+          icon: L.divIcon({ html:"🔴", iconSize:[16,16], iconAnchor:[8,16] })
         }).addTo(map);
 
       } else {
@@ -175,6 +174,7 @@ function handleMotion(e){
 
   prevAcc = curr;
 }
+
 
 /* ===== GPS ===== */
 function startGPS(){

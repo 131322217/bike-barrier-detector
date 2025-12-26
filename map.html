@@ -10,24 +10,17 @@
 html, body { height:100%; margin:0; }
 #map { width:100%; height:100%; }
 
-/* ===== panel ===== */
 .panel {
   position:absolute;
-  top:10px; left:10px;
+  top:10px;
+  left:10px;
   background:white;
   padding:8px;
   border-radius:8px;
   box-shadow:0 0 6px rgba(0,0,0,.2);
   z-index:1000;
-  width:220px;
 }
-.panel-header {
-  font-weight:bold;
-  margin-bottom:6px;
-}
-select { width:100%; }
 
-/* ===== label buttons ===== */
 .label-btn {
   margin:4px 2px;
   padding:4px 8px;
@@ -45,7 +38,7 @@ select { width:100%; }
 <div id="map"></div>
 
 <div class="panel">
-  <div class="panel-header">セッション選択</div>
+  <b>Session</b><br>
   <select id="sessionSelect"></select>
 </div>
 
@@ -88,40 +81,55 @@ function markerColor(label){
   return "#333";
 }
 
-/* ===== load ===== */
-async function loadSessions(){
+/* ===== load raw events (sessionId付き) ===== */
+async function loadEvents(){
   const snap = await getDocs(collection(db,"raw_sessions"));
-  const sessions = [];
+  const arr = [];
   snap.forEach(d=>{
-    const s = d.data();
-    if(s.logs){
-      sessions.push({
-        sessionId: s.sessionId,
-        logs: s.logs.filter(l=>l.isEvent)
-      });
-    }
+    const sessionId = d.data().sessionId;
+    d.data().logs?.forEach(l=>{
+      if(l.isEvent){
+        arr.push({
+          ...l,
+          sessionId
+        });
+      }
+    });
   });
-  return sessions;
+  return arr;
 }
+
+/* ===== state ===== */
+let allRaw = [];
+let currentSession = "all";
+let markers = [];
 
 /* ===== UI ===== */
 const sessionSelect = document.getElementById("sessionSelect");
+sessionSelect.onchange = e => {
+  currentSession = e.target.value;
+  draw();
+};
 
 /* ===== draw ===== */
-let markers = [];
-
 function clearMarkers(){
   markers.forEach(m=>map.removeLayer(m));
   markers = [];
 }
 
-function draw(session){
+function draw(){
   clearMarkers();
-  if(session.logs.length === 0) return;
 
-  /* --- グルーピング --- */
+  const source =
+    currentSession === "all"
+      ? allRaw
+      : allRaw.filter(p => p.sessionId === currentSession);
+
+  if(source.length === 0) return;
+
+  /* --- グルーピング（そのまま） --- */
   const groups = [];
-  session.logs.forEach(p=>{
+  source.forEach(p=>{
     let g = groups.find(g =>
       distance(p.lat,p.lng,g.lat,g.lng) < 6 &&
       Math.abs(p.z - g.avgZ) < 2
@@ -149,7 +157,7 @@ function draw(session){
   function detectedType(g){
     if((g.typeCount.step||0)/g.count >= 0.6) return "step";
     if((g.typeCount.curve||0)>0) return "curve";
-    return "flat";
+    return "candidate";
   }
 
   map.setView([groups[0].lat,groups[0].lng],16);
@@ -189,29 +197,26 @@ function draw(session){
             btn.classList.contains("step") ? "step" :
             btn.classList.contains("curve") ? "curve" : "flat";
 
-          const newLabel = (label===currentLabel) ? null : label;
-          currentLabel = newLabel;
+          currentLabel = label;
 
           marker.setStyle({
-            color: markerColor(newLabel),
-            fillColor: markerColor(newLabel)
+            color: markerColor(label),
+            fillColor: markerColor(label)
           });
 
-          marker.setPopupContent(popupHTML(newLabel));
+          marker.setPopupContent(popupHTML(label));
 
-          if(newLabel){
-            await addDoc(collection(db,"labels"),{
-              lat:g.lat,
-              lng:g.lng,
-              label_true:newLabel,
-              type_detected:detected,
-              diff:g.maxDiff,
-              z:g.avgZ,
-              angleDiff:g.maxAngle,
-              sessionId: session.sessionId,
-              updatedAt:new Date().toISOString()
-            });
-          }
+          await addDoc(collection(db,"labels"),{
+            lat:g.lat,
+            lng:g.lng,
+            label_true:label,
+            type_detected:detected,
+            diff:g.maxDiff,
+            z:g.avgZ,
+            angleDiff:g.maxAngle,
+            sessionId: currentSession,
+            updatedAt:new Date().toISOString()
+          });
         };
       });
     });
@@ -221,21 +226,18 @@ function draw(session){
 }
 
 /* ===== init ===== */
-const sessions = await loadSessions();
+allRaw = await loadEvents();
 
-sessionSelect.innerHTML = "";
-sessions.forEach((s,i)=>{
-  const o = document.createElement("option");
-  o.value = i;
-  o.textContent = s.sessionId;
+/* session selector */
+sessionSelect.innerHTML = '<option value="all">all</option>';
+[...new Set(allRaw.map(d=>d.sessionId))].forEach(id=>{
+  const o=document.createElement("option");
+  o.value=id;
+  o.textContent=id;
   sessionSelect.appendChild(o);
 });
 
-sessionSelect.onchange = e => {
-  draw(sessions[e.target.value]);
-};
-
-draw(sessions[0]);
+draw();
 </script>
 </body>
 </html>
