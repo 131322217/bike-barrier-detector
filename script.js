@@ -1,3 +1,4 @@
+// script.js
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
@@ -16,10 +17,9 @@ const statusText = document.getElementById("statusText");
 const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
-/* ===== 設定（データ収集用に低め） ===== */
-const STEP_DIFF = 30;
-const Z_THRESHOLD = 5;
-const ANGLE_THRESHOLD = 10;
+/* ===== 設定 ===== */
+const STEP_DIFF = 50;       // 段差
+const CURVE_DIFF = 45;      // カーブ判定下限
 const DISTANCE_FILTER_M = 5;
 const PRE_N = 3;
 const EVENT_COOLDOWN = 1500;
@@ -53,10 +53,7 @@ function distanceMeters(lat1,lng1,lat2,lng2){
 }
 
 function getAngle(p1, p2) {
-  return Math.atan2(
-    p2.lng - p1.lng,
-    p2.lat - p1.lat
-  ) * 180 / Math.PI;
+  return Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
 }
 
 /* ===== Map ===== */
@@ -65,6 +62,10 @@ function initMap(lat,lng){
   map = L.map("map").setView([lat,lng],17);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
   userMarker = L.marker([lat,lng]).addTo(map);
+}
+
+function markerColor(label){
+  return label==="step" ? "red" : label==="curve" ? "blue" : "green";
 }
 
 function updateMap(lat,lng){
@@ -95,13 +96,11 @@ function handleMotion(e){
     const dy = Math.abs(curr.y - prevAcc.y);
     const dz = Math.abs(curr.z - prevAcc.z);
 
-    const diff = Math.sqrt(
-      dx*dx + dy*dy + (dz*2)*(dz*2)
-    );
+    const diff = Math.sqrt(dx*dx + dy*dy + (dz*2)*(dz*2));
 
-    /* ===== 角度差計算（常に） ===== */
+    // 角度差保存
     let angleDiff = 0;
-    if (posHistory.length >= 3) {
+    if(posHistory.length >= 3){
       const a1 = getAngle(posHistory[0], posHistory[1]);
       const a2 = getAngle(posHistory[1], posHistory[2]);
       angleDiff = Math.abs(a2 - a1);
@@ -127,7 +126,7 @@ function handleMotion(e){
     if(recentSamples.length > 50) recentSamples.shift();
 
     const now = Date.now();
-    if (now - lastEventTime < EVENT_COOLDOWN) {
+    if(now - lastEventTime < EVENT_COOLDOWN){
       prevAcc = curr;
       return;
     }
@@ -139,32 +138,21 @@ function handleMotion(e){
       }
     }
 
-    /* ===== 判定ロジック ===== */
-    if (diff >= STEP_DIFF) { // ここを diff>=30 に合わせる
-
-      // angleDiff >=10ならカーブ
-      if (angleDiff >= ANGLE_THRESHOLD) {
-        sample.type = "curve";
-        logUI("カーブ検出");
-        L.marker([sample.lat, sample.lng], {
-          icon: L.divIcon({ html:"🔵", iconSize:[16,16], iconAnchor:[8,16] })
-        }).addTo(map);
-
-      } else if (dz > Z_THRESHOLD) {
+    // 判定ロジック（diffだけ）
+    if(diff >= CURVE_DIFF){
+      if(diff >= STEP_DIFF){
         sample.type = "step";
         logUI("段差検出");
         L.marker([sample.lat, sample.lng], {
           icon: L.divIcon({ html:"🔴", iconSize:[16,16], iconAnchor:[8,16] })
         }).addTo(map);
-
       } else {
-        sample.type = "candidate";
-        logUI("段差候補");
+        sample.type = "curve";
+        logUI("カーブ検出");
         L.marker([sample.lat, sample.lng], {
-          icon: L.divIcon({ html:"🟡", iconSize:[16,16], iconAnchor:[8,16] })
+          icon: L.divIcon({ html:"🔵", iconSize:[16,16], iconAnchor:[8,16] })
         }).addTo(map);
       }
-
       sample.isEvent = true;
       lastEventTime = now;
       saveEvent(recentSamples.slice(-PRE_N));
@@ -187,13 +175,76 @@ function startGPS(){
         lng: pos.coords.longitude,
         time: Date.now()
       });
-      if (posHistory.length > 5) posHistory.shift();
+      if(posHistory.length>5) posHistory.shift();
 
       statusText.textContent = "測定中";
     },
     ()=> statusText.textContent = "GPS取得失敗",
     { enableHighAccuracy:true }
   );
+}
+
+/* ===== 手動ラベル追加 ===== */
+function enableManualAdd(){
+  if(!map) return;
+
+  map.on('click', (e)=>{
+    const { lat, lng } = e.latlng;
+
+    const marker = L.circleMarker([lat,lng], {
+      radius:8,
+      color:"yellow",
+      fillColor:"yellow",
+      fillOpacity:0.7
+    }).addTo(map);
+
+    const popupHTML = () => `
+      <div>
+        <button class="label-btn step">段差</button>
+        <button class="label-btn curve">カーブ</button>
+        <button class="label-btn flat">平地</button>
+      </div>
+    `;
+
+    marker.bindPopup(popupHTML()).openPopup();
+
+    const detected = null;
+    const p = { lat, lng, diff:null, x:null, y:null, z:null, angleDiff:null };
+
+    marker.on("popupopen", ()=>{
+      const el = marker.getPopup().getElement();
+      el.querySelectorAll(".label-btn").forEach(btn=>{
+        btn.onclick = async ()=>{
+          const label =
+            btn.classList.contains("step") ? "step" :
+            btn.classList.contains("curve") ? "curve" : "flat";
+
+          marker.setStyle({
+            color: markerColor(label),
+            fillColor: markerColor(label)
+          });
+
+          marker.setPopupContent(label);
+
+          await addDoc(collection(db,"labels"),{
+            lat: p.lat,
+            lng: p.lng,
+            label_true: label,
+            type_detected: detected,
+            diff: p.diff,
+            x: p.x,
+            y: p.y,
+            z: p.z,
+            angleDiff: p.angleDiff,
+            sessionId: sessionId,
+            updatedAt: new Date().toISOString()
+          });
+
+          logUI(`${label} を手動追加しました`);
+        };
+      });
+    });
+  });
 }
 
 /* ===== Start ===== */
@@ -210,6 +261,8 @@ startStopBtn.addEventListener("click", async ()=>{
     startGPS();
     window.addEventListener("devicemotion", handleMotion);
     startStopBtn.textContent = "測定終了";
+
+    enableManualAdd(); // 手動ラベル追加有効化
   } else {
     isMeasuring = false;
     window.removeEventListener("devicemotion", handleMotion);

@@ -2,135 +2,92 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>段差検出アルゴリズム 評価</title>
+<title>散布図切替</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-box-and-violin-plot/build/Chart.BoxPlot.js"></script>
-
 <style>
-body { font-family: sans-serif; margin: 20px; }
-h1 { margin-bottom: 10px; }
-h2 { margin-top: 40px; }
-canvas { max-width: 900px; margin-bottom: 40px; }
+body { font-family: sans-serif; margin:20px; text-align:center; }
+canvas { max-width:900px; margin:20px auto; display:block; }
+button { margin:5px; padding:6px 12px; border-radius:4px; cursor:pointer; }
 </style>
 </head>
 <body>
 
-<h1>段差検出アルゴリズム 評価</h1>
-
-<h2>① 混同行列（機械判定 × 正解）</h2>
-<canvas id="confusionChart"></canvas>
-
-<h2>② diff 分布（正解ラベル別）</h2>
-<canvas id="diffChart"></canvas>
-
-<h2>③ z 分布（正解ラベル別）</h2>
-<canvas id="zChart"></canvas>
-
-<h2>④ x 分布（正解ラベル別）</h2>
-<canvas id="xChart"></canvas>
-
-<h2>⑤ y 分布（正解ラベル別）</h2>
-<canvas id="yChart"></canvas>
-
-<h2>⑥ angleDiff 分布（正解ラベル別）</h2>
-<canvas id="angleChart"></canvas>
-
-<h2>⑦ diff × angleDiff 散布図（正解ラベル別）</h2>
+<h1>散布図切替</h1>
 <canvas id="scatterChart"></canvas>
+
+<div>
+  <button data-x="diff" data-y="angleDiff">diff × angleDiff</button>
+  <button data-x="diff" data-y="z">diff × z</button>
+  <button data-x="diff" data-y="x">diff × x</button>
+  <button data-x="diff" data-y="y">diff × y</button>
+  <button data-x="diff" data-y="xyMean">diff × |x+y|/2</button>
+  <button data-x="xyMean" data-y="z">|x+y|/2 × z</button>
+  <button data-x="angleDiff" data-y="xyMean">angleDiff × |x+y|/2</button>
+  <button data-x="x" data-y="y">x × y</button>
+</div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-/* ===== Firebase ===== */
+/* Firebase */
 const app = initializeApp({
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
-/* ===== ラベル定義 ===== */
-const KEYS = ["step", "curve", "flat"];
+/* ラベル定義 */
+const KEYS = ["step","curve","flat"];
 const LABEL = { step:"段差", curve:"カーブ", flat:"平地" };
 const COLOR = { step:"rgba(220,38,38,0.7)", curve:"rgba(37,99,235,0.7)", flat:"rgba(34,197,94,0.7)" };
 
-/* ===== データ取得 ===== */
-const snap = await getDocs(collection(db, "labels"));
-const rows = snap.docs.map(d => d.data());
+/* データ取得 */
+const snap = await getDocs(collection(db,"labels"));
+let rows = snap.docs.map(d => {
+  const r = d.data();
+  return {
+    ...r,
+    xyMean: (typeof r.x==="number" && typeof r.y==="number") ? (Math.abs(r.x) + Math.abs(r.y))/2 : null
+  };
+});
 if(rows.length === 0) alert("labels にデータがありません");
 
-/* ===== 混同行列 ===== */
-const matrix = {};
-KEYS.forEach(d => { matrix[d] = {}; KEYS.forEach(t => matrix[d][t] = 0); });
-rows.forEach(r => {
-  if(matrix[r.type_detected] && matrix[r.type_detected][r.label_true] !== undefined){
-    matrix[r.type_detected][r.label_true]++;
-  }
-});
-new Chart(document.getElementById("confusionChart"), {
-  type: "bar",
-  data: {
-    labels: KEYS.map(k => LABEL[k]),
-    datasets: KEYS.map(trueKey => ({
-      label: `正解：${LABEL[trueKey]}`,
-      backgroundColor: COLOR[trueKey],
-      data: KEYS.map(detKey => matrix[detKey][trueKey])
-    }))
-  },
-  options: { responsive:true, plugins:{ legend:{ position:"top" } } }
-});
+/* 初期散布図描画 */
+const ctx = document.getElementById("scatterChart").getContext("2d");
+let chart;
 
-/* ===== boxplot 共通関数 ===== */
-function boxDatasets(field){
-  return KEYS.map(k => ({
+function drawScatter(xField, yField){
+  const datasets = KEYS.map(k => ({
     label: LABEL[k],
     backgroundColor: COLOR[k],
-    borderColor: COLOR[k],
     data: rows
-      .filter(r => r.label_true === k && typeof r[field] === "number")
-      .map(r => r[field])
+      .filter(r => r.label_true===k && typeof r[xField]==="number" && typeof r[yField]==="number")
+      .map(r => ({ x: r[xField], y: r[yField] }))
   }));
+
+  if(chart) chart.destroy(); // 前のチャート削除
+  chart = new Chart(ctx, {
+    type:'scatter',
+    data: { datasets },
+    options: {
+      responsive:true,
+      plugins:{ legend:{ position:"top" } },
+      scales:{
+        x:{ title:{ display:true, text: xField } },
+        y:{ title:{ display:true, text: yField } }
+      }
+    }
+  });
 }
 
-/* ===== 各ボックスプロット ===== */
-new Chart(document.getElementById("diffChart"), {
-  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("diff") }, options:{ responsive:true }
-});
-new Chart(document.getElementById("zChart"), {
-  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("z") }, options:{ responsive:true }
-});
-new Chart(document.getElementById("xChart"), {
-  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("x") }, options:{ responsive:true }
-});
-new Chart(document.getElementById("yChart"), {
-  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("y") }, options:{ responsive:true }
-});
-new Chart(document.getElementById("angleChart"), {
-  type:"boxplot", data:{ labels: KEYS.map(k=>LABEL[k]), datasets: boxDatasets("angleDiff") }, options:{ responsive:true }
-});
+/* 初期表示 */
+drawScatter("diff","angleDiff");
 
-/* ===== diff × angleDiff 散布図 ===== */
-new Chart(document.getElementById("scatterChart"), {
-  type:'scatter',
-  data:{
-    datasets: KEYS.map(k=>({
-      label: LABEL[k],
-      backgroundColor: COLOR[k],
-      data: rows
-        .filter(r => r.label_true === k && typeof r.diff==="number" && typeof r.angleDiff==="number")
-        .map(r => ({ x:r.diff, y:r.angleDiff }))
-    }))
-  },
-  options:{
-    responsive:true,
-    plugins:{ legend:{ position:"top" } },
-    scales:{
-      x:{ title:{ display:true, text:"diff (加速度合計)" } },
-      y:{ title:{ display:true, text:"angleDiff (角度差)" } }
-    }
-  }
+/* ボタン切替 */
+document.querySelectorAll("button").forEach(btn=>{
+  btn.onclick = ()=> drawScatter(btn.dataset.x, btn.dataset.y);
 });
 </script>
 
