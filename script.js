@@ -34,20 +34,13 @@ let prevAcc = null;
 let recentSamples = [];
 let eventMarkers = [];
 let lastEventTime = 0;
-let posHistory = [];
 
+/* ★ 追加：位置履歴 */
+let posHistory = [];
 
 /* ===== Utility ===== */
 function logUI(msg){
   resultText.textContent = msg;
-  console.log(msg);
-}
-
-function getAngle(p1, p2) {
-  return Math.atan2(
-    p2.lng - p1.lng,
-    p2.lat - p1.lat
-  ) * 180 / Math.PI;
 }
 
 function distanceMeters(lat1,lng1,lat2,lng2){
@@ -61,13 +54,19 @@ function distanceMeters(lat1,lng1,lat2,lng2){
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+/* ★ 角度計算 */
+function getAngle(p1, p2) {
+  return Math.atan2(
+    p2.lng - p1.lng,
+    p2.lat - p1.lat
+  ) * 180 / Math.PI;
+}
+
 /* ===== Map ===== */
 function initMap(lat,lng){
   if(map) return;
   map = L.map("map").setView([lat,lng],17);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution:"© OpenStreetMap contributors"
-  }).addTo(map);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
   userMarker = L.marker([lat,lng]).addTo(map);
 }
 
@@ -98,12 +97,13 @@ function handleMotion(e){
     const dx = Math.abs(curr.x - prevAcc.x);
     const dy = Math.abs(curr.y - prevAcc.y);
     const dz = Math.abs(curr.z - prevAcc.z);
+
+    /* ★ diff式変更 */
     const diff = Math.sqrt(
       dx * dx +
       dy * dy +
       (dz * 2) * (dz * 2)
     );
-
 
     accelerationText.textContent =
       `diff=${diff.toFixed(2)} dz=${dz.toFixed(2)}`;
@@ -125,13 +125,11 @@ function handleMotion(e){
 
     const now = Date.now();
 
-    // クールタイム
     if (now - lastEventTime < EVENT_COOLDOWN) {
       prevAcc = curr;
       return;
     }
 
-    // 距離フィルタ
     for(const m of eventMarkers){
       if(distanceMeters(m.lat, m.lng, sample.lat, sample.lng) < DISTANCE_FILTER_M){
         prevAcc = curr;
@@ -148,49 +146,47 @@ function handleMotion(e){
       saveEvent(recentSamples.slice(-PRE_N));
 
       L.marker([sample.lat, sample.lng], {
-          icon: L.divIcon({
-    html: "🔴",
-    className: "",   // ← これを追加
-    iconSize: [16,16],
-    iconAnchor: [8,16]
-  })
-})
-.addTo(map)
-.bindPopup(`段差<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
+        icon: L.divIcon({
+          html: "🔴",
+          iconSize: [16,16],
+          iconAnchor: [8,16]
+        })
+      }).addTo(map)
+        .bindPopup(`段差<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
+
       eventMarkers.push({ lat: sample.lat, lng: sample.lng });
       logUI("段差検出");
     }
 
-    /* ===== カーブ ===== */
+    /* ===== カーブ（ルート判定） ===== */
     else if (posHistory.length >= 3) {
-  const a1 = getAngle(posHistory[0], posHistory[1]);
-  const a2 = getAngle(posHistory[1], posHistory[2]);
-  const angleDiff = Math.abs(a2 - a1);
-    if (angleDiff > 15 && diff > 20 && dz <= Z_THRESHOLD) {
-      sample.isEvent = true;
-      sample.type = "curve";
-      lastEventTime = now;
+      const a1 = getAngle(posHistory[0], posHistory[1]);
+      const a2 = getAngle(posHistory[1], posHistory[2]);
+      const angleDiff = Math.abs(a2 - a1);
 
-      saveEvent(recentSamples.slice(-PRE_N));
+      if (angleDiff > 15 && diff > 20 && dz <= Z_THRESHOLD) {
+        sample.isEvent = true;
+        sample.type = "curve";
+        lastEventTime = now;
 
-      L.marker([sample.lat, sample.lng], {
+        saveEvent(recentSamples.slice(-PRE_N));
+
+        L.marker([sample.lat, sample.lng], {
           icon: L.divIcon({
-      html: "🔵",
-      className: "",   // ← これを追加
-      iconSize: [16,16],
-      iconAnchor: [8,16]
-    })
-  })
-  .addTo(map)
-  .bindPopup(`カーブ<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
+            html: "🔵",
+            iconSize: [16,16],
+            iconAnchor: [8,16]
+          })
+        }).addTo(map)
+          .bindPopup(`カーブ<br>角度=${angleDiff.toFixed(1)}°`);
 
         eventMarkers.push({ lat: sample.lat, lng: sample.lng });
         logUI("カーブ検出");
       }
     }
-
-    prevAcc = curr;
   }
+
+  prevAcc = curr;
 }
 
 /* ===== GPS ===== */
@@ -199,17 +195,17 @@ function startGPS(){
     pos=>{
       lastPosition = pos.coords;
       updateMap(pos.coords.latitude, pos.coords.longitude);
+
       posHistory.push({
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
         time: Date.now()
       });
+      if (posHistory.length > 5) posHistory.shift();
 
-  if (posHistory.length > 5) posHistory.shift();
       statusText.textContent = "測定中";
     },
     err=>{
-      console.warn(err);
       statusText.textContent = "GPS取得失敗";
     },
     { enableHighAccuracy:true }
@@ -227,12 +223,13 @@ async function requestMotionPermission(){
 
 /* ===== Start / Stop ===== */
 startStopBtn.addEventListener("click", async ()=>{
-  if(!isMeasuring){
-    if(!await requestMotionPermission()){
-      alert("加速度センサの許可が必要です");
-      return;
-    }
+  const ok = await requestMotionPermission();
+  if(!ok){
+    alert("加速度センサの許可が必要です");
+    return;
+  }
 
+  if(!isMeasuring){
     isMeasuring = true;
     sessionId = new Date().toISOString();
     prevAcc = null;
