@@ -4,36 +4,68 @@
   <meta charset="UTF-8">
   <title>Barrier Map</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+
   <style>
     html, body { height: 100%; margin: 0; }
     #map { width: 100%; height: 100%; }
 
     .panel {
       position: absolute;
-      top: 10px; left: 10px;
-      background: white; padding: 8px;
-      border-radius: 8px; font-size: 13px;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 8px;
+      border-radius: 8px;
+      font-size: 13px;
       box-shadow: 0 0 6px rgba(0,0,0,0.2);
       z-index: 1000;
     }
-    .panel button { margin: 2px; padding: 4px 8px; }
-    .legend { margin-top: 6px; font-size: 12px; }
-    .box { display: inline-block; width:12px; height:12px; margin-right:4px; border-radius:50%; }
+
+    .panel button, .panel select {
+      margin: 3px 0;
+      padding: 4px 6px;
+      width: 100%;
+    }
+
+    .legend {
+      margin-top: 6px;
+      font-size: 12px;
+    }
+
+    .box {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-right: 4px;
+      border-radius: 50%;
+    }
   </style>
 </head>
 <body>
+
 <div id="map"></div>
 
 <div class="panel">
-  <b>表示モード</b><br>
-  <button onclick="setMode('latest')">最新のみ</button>
-  <button onclick="setMode('all')">全データ</button>
+  <b>セッション選択</b><br>
+  <select id="sessionSelect" onchange="changeSession(this.value)">
+    <option value="all">すべて</option>
+  </select>
+
   <hr>
+
+  <b>表示切替</b><br>
+  <label><input type="checkbox" id="showStep" checked> 段差</label><br>
+  <label><input type="checkbox" id="showCurve" checked> カーブ</label>
+
+  <hr>
+
   <b>段差信頼度</b><br>
   <button onclick="setLevel(0.6)">6割</button>
   <button onclick="setLevel(0.7)">7割</button>
   <button onclick="setLevel(0.8)">8割</button>
+
   <div class="legend">
     <div><span class="box" style="background:red"></span>段差</div>
     <div><span class="box" style="background:blue"></span>カーブ</div>
@@ -41,139 +73,191 @@
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-// Firebase 初期化
+/* ===== Firebase ===== */
 const app = initializeApp({
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
+/* ===== Map ===== */
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
+/* ===== State ===== */
 let allData = [];
 let markers = [];
-let mode = 'all';
-let level = 0.7; // 信頼度7割初期
+let sessions = [];
+let selectedSession = "all";
+let level = 0.7;
 
-// 距離計算（Haversine）
+/* ===== Utils ===== */
 function distanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
-  return 2*R*Math.asin(Math.sqrt(a));
+  const a =
+    Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180) *
+    Math.cos(lat2*Math.PI/180) *
+    Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// データ取得
+/* ===== Load Firestore ===== */
 async function loadData() {
   const snapshot = await getDocs(collection(db, "raw_sessions"));
   const points = [];
 
   snapshot.forEach(doc => {
     const data = doc.data();
-    if(!data.logs) return;
+    if (!data.logs) return;
 
     data.logs.forEach(log => {
-      if(log.isEvent && log.lat && log.lng) {
+      if (log.isEvent && log.lat && log.lng) {
         points.push({
           lat: log.lat,
           lng: log.lng,
           diff: log.diff,
-          type: log.type // step or curve
+          type: log.type,
+          sessionId: data.sessionId
         });
       }
     });
   });
+
   return points;
 }
 
-// グルーピング（同地点まとめ）
+/* ===== Session list ===== */
+function extractSessions(data) {
+  const set = new Set();
+  data.forEach(d => set.add(d.sessionId));
+  return Array.from(set);
+}
+
+function setupSessionSelector() {
+  const select = document.getElementById("sessionSelect");
+  sessions.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = s;
+    select.appendChild(opt);
+  });
+}
+
+window.changeSession = v => {
+  selectedSession = v;
+  draw();
+};
+
+/* ===== Grouping ===== */
 function groupPoints(points) {
   const groups = [];
+
   points.forEach(p => {
-    let added = false;
-    for(const g of groups) {
+    let found = false;
+
+    for (const g of groups) {
       const d = distanceMeters(p.lat, p.lng, g.lat, g.lng);
-      if(d <= 5) { // 5m以内
+      if (d <= 5) {
         g.count++;
         g.sumLat += p.lat;
         g.sumLng += p.lng;
         g.sumDiff += p.diff;
         g.maxDiff = Math.max(g.maxDiff, p.diff);
-        g.typeCount[p.type] = (g.typeCount[p.type]||0)+1;
-
-        g.lat = g.sumLat/g.count;
-        g.lng = g.sumLng/g.count;
-        added = true;
+        g.typeCount[p.type] = (g.typeCount[p.type] || 0) + 1;
+        g.lat = g.sumLat / g.count;
+        g.lng = g.sumLng / g.count;
+        found = true;
         break;
       }
     }
-    if(!added) {
+
+    if (!found) {
       groups.push({
-        lat: p.lat, lng: p.lng,
-        sumLat: p.lat, sumLng: p.lng,
+        lat: p.lat,
+        lng: p.lng,
+        sumLat: p.lat,
+        sumLng: p.lng,
         sumDiff: p.diff,
         maxDiff: p.diff,
-        count:1,
-        typeCount: { [p.type]: 1 },
+        count: 1,
+        typeCount: { [p.type]: 1 }
       });
     }
   });
+
   return groups;
 }
 
-// 描画
+/* ===== Draw ===== */
 function draw() {
   markers.forEach(m => map.removeLayer(m));
   markers = [];
 
   let data = [...allData];
-  if(mode==='latest') data = [data[data.length-1]];
+
+  // セッション絞り込み
+  if (selectedSession !== "all") {
+    data = data.filter(d => d.sessionId === selectedSession);
+  }
+
+  // 表示ON/OFF
+  const showStep = document.getElementById("showStep").checked;
+  const showCurve = document.getElementById("showCurve").checked;
+
+  data = data.filter(d => {
+    if (d.type === "step" && showStep) return true;
+    if (d.type === "curve" && showCurve) return true;
+    return false;
+  });
 
   const groups = groupPoints(data);
 
-  // 初期位置設定
-  if(groups.length === 0){
-    map.setView([35.681236, 139.767125], 13); // データなし時は東京
-  } else {
-    const center = groups.reduce((a,b)=> a.count>b.count?a:b);
-    map.setView([center.lat, center.lng], 16);
+  if (groups.length === 0) {
+    map.setView([35.681236, 139.767125], 13);
+    return;
   }
 
-  groups.forEach(g=>{
-    let stepRatio = (g.typeCount['step']||0)/g.count;
-    let type = 'curve';
-    if(stepRatio>=level) type = 'step';
-    const color = type==='step'?'red':'blue';
-    const avgDiff = g.sumDiff/g.count;
+  map.setView([groups[0].lat, groups[0].lng], 16);
 
-    const marker = L.circleMarker([g.lat, g.lng],{
-      radius:8, color, fillColor:color, fillOpacity:0.7
+  groups.forEach(g => {
+    const stepRatio = (g.typeCount["step"] || 0) / g.count;
+    const type = stepRatio >= level ? "step" : "curve";
+    const color = type === "step" ? "red" : "blue";
+
+    const marker = L.circleMarker([g.lat, g.lng], {
+      radius: 8,
+      color,
+      fillColor: color,
+      fillOpacity: 0.7
     }).addTo(map);
 
     marker.bindPopup(`
-      <b>${type==='step'?'段差':'カーブ'}</b><br>
-      検出回数：${g.count} 回<br>
-      平均 diff：${avgDiff.toFixed(2)}<br>
-      最大 diff：${g.maxDiff.toFixed(2)}<br>
-      <a href="detail.html?lat=${g.lat}&lng=${g.lng}" target="_blank">詳細データを見る</a>
+      <b>${type === "step" ? "段差" : "カーブ"}</b><br>
+      回数：${g.count}<br>
+      平均diff：${(g.sumDiff / g.count).toFixed(2)}<br>
+      最大diff：${g.maxDiff.toFixed(2)}
     `);
 
     markers.push(marker);
   });
 }
 
-// 初期データ取得して描画
+/* ===== Init ===== */
 allData = await loadData();
+sessions = extractSessions(allData);
+setupSessionSelector();
 draw();
 
-window.setMode = m => { mode=m; draw(); };
-window.setLevel = l => { level=l; draw(); };
+window.setLevel = l => { level = l; draw(); };
 </script>
+
 </body>
 </html>
