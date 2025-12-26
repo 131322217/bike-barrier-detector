@@ -17,7 +17,8 @@ const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
 /* ===== 設定 ===== */
-const STEP_DIFF = 30;
+const STEP_DIFF = 50;
+const CURVE_DIFF = 45;
 const DISTANCE_FILTER_M = 5;
 const PRE_N = 3;
 const EVENT_COOLDOWN = 1500;
@@ -50,8 +51,15 @@ function distanceMeters(lat1,lng1,lat2,lng2){
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function getAngle(p1, p2) {
-  return Math.atan2(p2.lng - p1.lng, p2.lat - p1.lat) * 180 / Math.PI;
+function popupHTML(currentType){
+  return `
+    <div style="text-align:center;">
+      <button class="label-btn step">段差</button>
+      <button class="label-btn curve">カーブ</button>
+      <button class="label-btn flat">平地</button>
+      <div style="margin-top:4px;">現在: ${currentType}</div>
+    </div>
+  `;
 }
 
 /* ===== Map ===== */
@@ -67,27 +75,6 @@ function updateMap(lat,lng){
   userMarker.setLatLng([lat,lng]);
 }
 
-function markerColor(label){
-  switch(label){
-    case "step": return "red";
-    case "curve": return "blue";
-    case "flat": return "green";
-    case "manual": return "yellow";
-    default: return "gray";
-  }
-}
-
-function popupHTML(label){
-  return `
-    <div>
-      <button class="label-btn step">段差</button>
-      <button class="label-btn curve">カーブ</button>
-      <button class="label-btn flat">平地</button>
-      <p>現在: ${label}</p>
-    </div>
-  `;
-}
-
 /* ===== Firestore ===== */
 async function saveEvent(samples){
   await addDoc(collection(db,"raw_sessions"),{
@@ -100,34 +87,23 @@ async function saveEvent(samples){
 /* ===== Motion ===== */
 function handleMotion(e){
   if(!isMeasuring || !lastPosition) return;
-
   const acc = e.accelerationIncludingGravity;
   if(!acc) return;
 
   const curr = { x: acc.x||0, y: acc.y||0, z: acc.z||0 };
-
   if(prevAcc){
     const dx = Math.abs(curr.x - prevAcc.x);
     const dy = Math.abs(curr.y - prevAcc.y);
     const dz = Math.abs(curr.z - prevAcc.z);
-
     const diff = Math.sqrt(dx*dx + dy*dy + (dz*2)*(dz*2));
 
-    let angleDiff = 0;
-    if(posHistory.length >= 3){
-      const a1 = getAngle(posHistory[0], posHistory[1]);
-      const a2 = getAngle(posHistory[1], posHistory[2]);
-      angleDiff = Math.abs(a2 - a1);
-    }
-
-    accelerationText.textContent = `diff=${diff.toFixed(2)} dz=${dz.toFixed(2)} angle=${angleDiff.toFixed(1)}`;
+    accelerationText.textContent = `diff=${diff.toFixed(2)} dz=${dz.toFixed(2)}`;
 
     const sample = {
       x: parseFloat(curr.x.toFixed(2)),
       y: parseFloat(curr.y.toFixed(2)),
       z: parseFloat(curr.z.toFixed(2)),
       diff: parseFloat(diff.toFixed(2)),
-      angleDiff: parseFloat(angleDiff.toFixed(2)),
       lat: lastPosition.latitude,
       lng: lastPosition.longitude,
       timestamp: new Date().toISOString(),
@@ -136,7 +112,7 @@ function handleMotion(e){
     };
 
     recentSamples.push(sample);
-    if(recentSamples.length>50) recentSamples.shift();
+    if(recentSamples.length > 50) recentSamples.shift();
 
     const now = Date.now();
     if(now - lastEventTime < EVENT_COOLDOWN){
@@ -151,66 +127,67 @@ function handleMotion(e){
       }
     }
 
-    /* 判定ロジック */
-    if(diff >= 45){
-      if(diff >= 50){
+    /* ===== 判定 ===== */
+    if(diff >= CURVE_DIFF){
+      if(diff >= STEP_DIFF){
         sample.type = "step";
         logUI("段差検出");
+        createMarker(sample,"red");
       } else {
         sample.type = "curve";
         logUI("カーブ検出");
+        createMarker(sample,"blue");
       }
-
       sample.isEvent = true;
       lastEventTime = now;
       saveEvent(recentSamples.slice(-PRE_N));
-
-      const marker = L.circleMarker([sample.lat, sample.lng],{
-        radius:8,
-        color: markerColor(sample.type),
-        fillColor: markerColor(sample.type),
-        fillOpacity:0.7
-      }).addTo(map);
-
-      marker.bindPopup(popupHTML(sample.type)).openPopup();
-
-      // ポップアップでラベル変更可能
-      marker.on("popupopen", async e=>{
-        const el = e.popup.getElement();
-        el.querySelectorAll(".label-btn").forEach(btn=>{
-          btn.onclick = async ()=>{
-            const label = btn.classList.contains("step") ? "step" :
-                          btn.classList.contains("curve") ? "curve" : "flat";
-
-            marker.setStyle({
-              color: markerColor("manual"),
-              fillColor: markerColor("manual")
-            });
-
-            marker.setPopupContent(popupHTML(label));
-
-            await addDoc(collection(db,"labels"),{
-              lat: sample.lat,
-              lng: sample.lng,
-              label_true: label,
-              type_detected: sample.type,
-              diff: sample.diff,
-              x: sample.x,
-              y: sample.y,
-              z: sample.z,
-              angleDiff: sample.angleDiff,
-              sessionId: sessionId,
-              updatedAt: new Date().toISOString()
-            });
-          };
-        });
-      });
-
       eventMarkers.push({ lat: sample.lat, lng: sample.lng });
     }
   }
-
   prevAcc = curr;
+}
+
+/* ===== マーカー作成 + ポップアップ ===== */
+function createMarker(sample,color){
+  const marker = L.circleMarker([sample.lat, sample.lng],{
+    radius: 8,
+    color: color,
+    fillColor: color,
+    fillOpacity: 0.7
+  }).addTo(map);
+
+  marker.bindPopup(popupHTML(sample.type));
+
+  marker.on("click", ()=>{
+    marker.openPopup();
+    setTimeout(()=>{
+      const el = marker.getPopup().getElement();
+      el.querySelectorAll(".label-btn").forEach(btn=>{
+        btn.onclick = async ()=>{
+          const label = btn.classList.contains("step")?"step":
+                        btn.classList.contains("curve")?"curve":"flat";
+
+          marker.setStyle({ color:"yellow", fillColor:"yellow" });
+          marker.setPopupContent(popupHTML(label));
+
+          await addDoc(collection(db,"labels"),{
+            lat: sample.lat,
+            lng: sample.lng,
+            label_true: label,
+            type_detected: sample.type,
+            diff: sample.diff,
+            x: sample.x,
+            y: sample.y,
+            z: sample.z,
+            sessionId: sessionId,
+            updatedAt: new Date().toISOString()
+          });
+
+          logUI(`${label} を手動追加しました`);
+        };
+      });
+    },50);
+  });
 }
 
 /* ===== GPS ===== */
@@ -220,16 +197,12 @@ function startGPS(){
       lastPosition = pos.coords;
       updateMap(pos.coords.latitude, pos.coords.longitude);
 
-      posHistory.push({
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        time: Date.now()
-      });
+      posHistory.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, time: Date.now() });
       if(posHistory.length>5) posHistory.shift();
 
       statusText.textContent = "測定中";
     },
-    ()=> statusText.textContent = "GPS取得失敗",
+    ()=>statusText.textContent="GPS取得失敗",
     { enableHighAccuracy:true }
   );
 }

@@ -262,18 +262,17 @@ function draw(){
           m.setPopupContent(popupHTML(label));
 
             await addDoc(collection(db,"labels"),{
-              lat: sample.lat,
-              lng: sample.lng,
+              lat: g.lat,
+              lng: g.lng,
               label_true: label,
-              type_detected: sample.type,
-              diff: sample.diff,
-              x: sample.x,
-              y: sample.y,
-              z: sample.z,
-              angleDiff: sample.angleDiff,
-              sessionId: sessionId,
+              type_detected: type,
+              avgDiff: g.sumDiff/g.count,
+              maxDiff: g.maxDiff,
+              x: p.x,      // ← 元データの x
+              y: p.y,      // ← 元データの y
+              z: p.z,      // ← 元データの z
               updatedAt: new Date().toISOString()
-            });
+          });
         };
       });
     });
