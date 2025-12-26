@@ -17,14 +17,12 @@ button { margin:5px; padding:6px 12px; border-radius:4px; cursor:pointer; }
 <canvas id="scatterChart"></canvas>
 
 <div>
-  <button data-x="diff" data-y="angleDiff">diff × angleDiff</button>
-  <button data-x="diff" data-y="z">diff × z</button>
-  <button data-x="diff" data-y="x">diff × x</button>
-  <button data-x="diff" data-y="y">diff × y</button>
-  <button data-x="diff" data-y="xyMean">diff × |x+y|/2</button>
-  <button data-x="xyMean" data-y="z">|x+y|/2 × z</button>
-  <button data-x="angleDiff" data-y="xyMean">angleDiff × |x+y|/2</button>
-  <button data-x="x" data-y="y">x × y</button>
+  <button data-x="avgDiff" data-y="maxDiff">avgDiff × maxDiff</button>
+  <button data-x="avgDiff" data-y="lat">avgDiff × lat</button>
+  <button data-x="avgDiff" data-y="lng">avgDiff × lng</button>
+  <button data-x="maxDiff" data-y="lat">maxDiff × lat</button>
+  <button data-x="maxDiff" data-y="lng">maxDiff × lng</button>
+  <button data-x="lat" data-y="lng">lat × lng</button>
 </div>
 
 <script type="module">
@@ -45,13 +43,8 @@ const COLOR = { step:"rgba(220,38,38,0.7)", curve:"rgba(37,99,235,0.7)", flat:"r
 
 /* データ取得 */
 const snap = await getDocs(collection(db,"labels"));
-let rows = snap.docs.map(d => {
-  const r = d.data();
-  return {
-    ...r,
-    xyMean: (typeof r.x==="number" && typeof r.y==="number") ? (Math.abs(r.x) + Math.abs(r.y))/2 : null
-  };
-});
+let rows = snap.docs.map(d => d.data());
+
 if(rows.length === 0) alert("labels にデータがありません");
 
 /* 初期散布図描画 */
@@ -83,7 +76,7 @@ function drawScatter(xField, yField){
 }
 
 /* 初期表示 */
-drawScatter("diff","angleDiff");
+drawScatter("avgDiff","maxDiff");
 
 /* ボタン切替 */
 document.querySelectorAll("button").forEach(btn=>{
