@@ -9,15 +9,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-box-and-violin-plot/build/Chart.BoxPlot.js"></script>
 
 <style>
-body {
-  font-family: sans-serif;
-  margin: 20px;
-}
-h2 { margin-top: 40px; }
-canvas {
-  max-width: 800px;
-  margin-bottom: 40px;
-}
+body { font-family: sans-serif; margin: 20px; }
+canvas { max-width: 900px; margin-bottom: 40px; }
 </style>
 </head>
 <body>
@@ -27,10 +20,10 @@ canvas {
 <h2>① 混同行列</h2>
 <canvas id="confusionChart"></canvas>
 
-<h2>② diff 分布（正解ラベル別）</h2>
+<h2>② diff 分布</h2>
 <canvas id="diffChart"></canvas>
 
-<h2>③ z 分布（正解ラベル別）</h2>
+<h2>③ z 分布</h2>
 <canvas id="zChart"></canvas>
 
 <script type="module">
@@ -39,39 +32,32 @@ import { getFirestore, collection, getDocs } from "https://www.gstatic.com/fireb
 
 /* ===== Firebase ===== */
 const app = initializeApp({
-  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  apiKey: "YOUR_API_KEY",
   projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
-/* ===== label 定義 ===== */
-const LABEL_MAP = {
-  step: "段差",
-  curve: "カーブ",
-  none: "平地"
-};
-
-const COLOR_MAP = {
-  step: "rgba(220, 38, 38, 0.7)",   // 赤
-  curve: "rgba(37, 99, 235, 0.7)",  // 青
-  none: "rgba(50, 200, 99, 0.6)"  // 緑
-};
-
+/* ===== 定義 ===== */
 const KEYS = ["step", "curve", "none"];
+const LABEL = { step: "段差", curve: "カーブ", none: "平地" };
+const COLOR = {
+  step: "rgba(220,38,38,0.7)",
+  curve: "rgba(37,99,235,0.7)",
+  none: "rgba(34,197,94,0.7)"
+};
 
-/* ===== load data ===== */
+/* ===== load ===== */
 const snap = await getDocs(collection(db, "event_labels"));
-const data = [];
-snap.forEach(d => data.push(d.data()));
+const rows = snap.docs.map(d => d.data());
 
 /* ===== 混同行列 ===== */
-const matrix = {
-  step:  {step:0, curve:0, none:0},
-  curve: {step:0, curve:0, none:0},
-  none:  {step:0, curve:0, none:0}
-};
+const matrix = {};
+KEYS.forEach(a => {
+  matrix[a] = {};
+  KEYS.forEach(b => matrix[a][b] = 0);
+});
 
-data.forEach(d => {
+rows.forEach(d => {
   if (matrix[d.type_detected] && matrix[d.type_detected][d.type_true] !== undefined) {
     matrix[d.type_detected][d.type_true]++;
   }
@@ -80,57 +66,36 @@ data.forEach(d => {
 new Chart(document.getElementById("confusionChart"), {
   type: "bar",
   data: {
-    labels: KEYS.map(k => LABEL_MAP[k]),
-    datasets: KEYS.map(k => ({
-      label: `正解：${LABEL_MAP[k]}`,
-      backgroundColor: COLOR_MAP[k],
-      data: KEYS.map(x => matrix[x][k])
+    labels: KEYS.map(k => LABEL[k]),
+    datasets: KEYS.map(trueKey => ({
+      label: `正解：${LABEL[trueKey]}`,
+      backgroundColor: COLOR[trueKey],
+      data: KEYS.map(detKey => matrix[detKey][trueKey])
     }))
-  },
-  options: {
-    responsive: true,
-    plugins: {
-      legend: { position: "top" }
-    }
   }
 });
 
-/* ===== 分布用 ===== */
-function boxDataset(key) {
+/* ===== 分布 ===== */
+function boxData(field) {
   return KEYS.map(k => ({
-    label: LABEL_MAP[k],
-    backgroundColor: COLOR_MAP[k],
-    borderColor: COLOR_MAP[k],
-    data: data
-      .filter(d => d.type_true === k && typeof d[key] === "number")
-      .map(d => d[key])
+    label: LABEL[k],
+    backgroundColor: COLOR[k],
+    borderColor: COLOR[k],
+    data: rows
+      .filter(d => d.type_true === k && typeof d[field] === "number")
+      .map(d => d[field])
   }));
 }
 
-/* ===== diff ===== */
 new Chart(document.getElementById("diffChart"), {
   type: "boxplot",
-  data: {
-    labels: KEYS.map(k => LABEL_MAP[k]),
-    datasets: boxDataset("diff")
-  },
-  options: {
-    responsive: true
-  }
+  data: { labels: KEYS.map(k => LABEL[k]), datasets: boxData("diff") }
 });
 
-/* ===== z ===== */
 new Chart(document.getElementById("zChart"), {
   type: "boxplot",
-  data: {
-    labels: KEYS.map(k => LABEL_MAP[k]),
-    datasets: boxDataset("z")
-  },
-  options: {
-    responsive: true
-  }
+  data: { labels: KEYS.map(k => LABEL[k]), datasets: boxData("z") }
 });
 </script>
-
 </body>
 </html>
