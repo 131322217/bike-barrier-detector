@@ -4,174 +4,52 @@
 <meta charset="UTF-8">
 <title>Barrier Map</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
 
 <style>
 html, body { height:100%; margin:0; }
 #map { width:100%; height:100%; }
 
-.panel {
-  position:absolute;
-  top:10px; left:10px;
-  background:white;
-  padding:8px;
-  border-radius:8px;
-  box-shadow:0 0 6px rgba(0,0,0,.2);
-  z-index:1000;
-  width:210px;
-}
-
-.panel-header {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  font-weight:bold;
-}
-
-.panel-body { margin-top:6px; }
-.hidden { display:none; }
-
-button, select {
-  width:100%;
-  margin-top:4px;
-}
-
-.levelBtn.active {
-  background:#007bff;
-  color:white;
-}
-
-.legend { font-size:12px; margin-top:6px; }
-.box {
-  width:12px;
-  height:12px;
-  display:inline-block;
-  border-radius:50%;
-  margin-right:4px;
-}
-
-#noData {
-  position:absolute;
-  top:50%;
-  left:50%;
-  transform:translate(-50%,-50%);
-  background:white;
-  padding:12px 20px;
-  border-radius:8px;
-  box-shadow:0 0 8px rgba(0,0,0,.3);
-  font-weight:bold;
-  display:none;
-}
-
-/* ===== 正解入力ボタン ===== */
-.labelBtn {
-  margin-top:4px;
-  padding:4px;
+.label-btn {
+  margin:4px 2px;
+  padding:4px 8px;
   border-radius:6px;
   border:1px solid #ccc;
-  background:#f5f5f5;
   cursor:pointer;
-  font-size:12px;
 }
-
-.labelBtn.active.step { background:#ff4d4d; color:white; }
-.labelBtn.active.curve { background:#4d79ff; color:white; }
-.labelBtn.active.none { background:#999; color:white; }
+.label-btn.active.step { background:#ff4d4d; color:white; }
+.label-btn.active.curve { background:#4d79ff; color:white; }
+.label-btn.active.flat { background:#aaa; color:white; }
 </style>
 </head>
-
 <body>
 
 <div id="map"></div>
-<div id="noData">データがありません</div>
-
-<div class="panel">
-  <div class="panel-header">
-    <span>表示設定</span>
-    <button id="toggleBtn">▼</button>
-  </div>
-
-  <div class="panel-body" id="panelBody">
-    <b>セッション</b>
-    <select id="sessionSelect"></select>
-
-    <hr>
-
-    <label><input type="checkbox" id="showStep" checked> 段差</label><br>
-    <label><input type="checkbox" id="showCurve" checked> カーブ</label><br>
-    <label><input type="checkbox" id="showCandidate" checked> 段差候補</label>
-
-    <hr>
-
-    <b>段差信頼度</b>
-    <button class="levelBtn" data-level="0.6">6割</button>
-    <button class="levelBtn active" data-level="0.7">7割</button>
-    <button class="levelBtn" data-level="0.8">8割</button>
-
-    <div class="legend">
-      <div><span class="box" style="background:red"></span>段差</div>
-      <div><span class="box" style="background:blue"></span>カーブ</div>
-      <div><span class="box" style="background:yellow"></span>段差候補</div>
-    </div>
-  </div>
-</div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import {
   getFirestore,
   collection,
   getDocs,
-  updateDoc,
-  doc
+  addDoc,
+  query,
+  where
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-/* Firebase */
+/* ===== Firebase ===== */
 const app = initializeApp({
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
-/* Map */
+/* ===== Map ===== */
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let allData = [];
-let markers = [];
-let selectedSession = "all";
-let level = 0.7;
-
-/* UI */
-const showStep = document.getElementById("showStep");
-const showCurve = document.getElementById("showCurve");
-const showCandidate = document.getElementById("showCandidate");
-const noDataBox = document.getElementById("noData");
-
-document.getElementById("toggleBtn").onclick = () => {
-  document.getElementById("panelBody").classList.toggle("hidden");
-};
-
-document.querySelectorAll(".levelBtn").forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll(".levelBtn").forEach(x => x.classList.remove("active"));
-    b.classList.add("active");
-    level = parseFloat(b.dataset.level);
-    draw();
-  };
-});
-
-document.getElementById("sessionSelect").onchange = e => {
-  selectedSession = e.target.value;
-  draw();
-};
-
-showStep.onchange = showCurve.onchange = showCandidate.onchange = draw;
-
-/* util */
+/* ===== util ===== */
 function distance(a,b,c,d){
   const R=6371000;
   const dLat=(c-a)*Math.PI/180;
@@ -182,101 +60,111 @@ function distance(a,b,c,d){
   ));
 }
 
-/* load */
-async function load(){
+/* ===== load raw events ===== */
+async function loadEvents(){
   const snap = await getDocs(collection(db,"raw_sessions"));
   const arr = [];
   snap.forEach(d=>{
     d.data().logs?.forEach(l=>{
       if(l.isEvent){
-        arr.push({
-          ...l,
-          sessionId: d.data().sessionId,
-          _docId: d.id
-        });
+        arr.push({...l});
       }
     });
   });
   return arr;
 }
 
-/* Firestore 正解入力 */
-window.setLabel = async function(docId, label, btn){
-  const parent = btn.parentElement;
-  parent.querySelectorAll(".labelBtn").forEach(b=>b.classList.remove("active"));
-  btn.classList.add("active", label ?? "none");
-
-  try{
-    await updateDoc(doc(db,"raw_sessions",docId),{
-      label: label
-    });
-  }catch(e){
-    alert("保存失敗");
-    console.error(e);
-  }
-};
-
-/* draw */
-function draw(){
-  markers.forEach(m=>map.removeLayer(m));
-  markers = [];
-
-  let data = allData.filter(d =>
-    selectedSession==="all" || d.sessionId===selectedSession
+/* ===== label helpers ===== */
+async function getLabel(lat,lng){
+  const q = query(
+    collection(db,"labels"),
+    where("lat","==",lat),
+    where("lng","==",lng)
   );
-
-  if(!showStep.checked) data = data.filter(d=>d.type!=="step");
-  if(!showCurve.checked) data = data.filter(d=>d.type!=="curve");
-  if(!showCandidate.checked) data = data.filter(d=>d.type!=="candidate");
-
-  if(data.length === 0){
-    noDataBox.style.display = "block";
-    return;
-  } else {
-    noDataBox.style.display = "none";
-  }
-
-  map.setView([data[0].lat,data[0].lng],16);
-
-  data.forEach(p=>{
-    const color = p.type==="step" ? "red" :
-                  p.type==="curve" ? "blue" : "yellow";
-
-    const m = L.circleMarker([p.lat,p.lng],{
-      radius:8,
-      color,
-      fillColor:color,
-      fillOpacity:0.7
-    }).addTo(map);
-
-    m.bindPopup(`
-      <b>${p.type==="step"?"段差":p.type==="curve"?"カーブ":"段差候補"}</b><br>
-      diff：${p.diff.toFixed(2)}<br><br>
-
-      <b>正解入力</b><br>
-      <button class="labelBtn step" onclick="setLabel('${p._docId}','step',this)">段差</button>
-      <button class="labelBtn curve" onclick="setLabel('${p._docId}','curve',this)">カーブ</button>
-      <button class="labelBtn none" onclick="setLabel('${p._docId}',null,this)">未設定</button>
-    `);
-
-    markers.push(m);
-  });
+  const snap = await getDocs(q);
+  if(snap.empty) return null;
+  return { id:snap.docs[0].id, ...snap.docs[0].data() };
 }
 
-/* init */
-allData = await load();
+async function saveLabel(lat,lng,label){
+  const existing = await getLabel(lat,lng);
 
-const sel=document.getElementById("sessionSelect");
-sel.innerHTML='<option value="all">すべて</option>';
-[...new Set(allData.map(d=>d.sessionId))].forEach(s=>{
-  const o=document.createElement("option");
-  o.value=s;
-  o.textContent=s;
-  sel.appendChild(o);
+  if(existing && existing.label_true === label){
+    // 同じものを押した → 解除
+    await addDoc(collection(db,"labels"),{
+      lat,lng,
+      label_true:null,
+      updatedAt:new Date().toISOString()
+    });
+    return null;
+  }
+
+  await addDoc(collection(db,"labels"),{
+    lat,lng,
+    label_true:label,
+    updatedAt:new Date().toISOString()
+  });
+  return label;
+}
+
+/* ===== main ===== */
+const data = await loadEvents();
+
+/* グループ化（簡易） */
+const groups = [];
+data.forEach(p=>{
+  let g = groups.find(g=>distance(p.lat,p.lng,g.lat,g.lng)<5);
+  if(!g){
+    groups.push({
+      lat:p.lat,
+      lng:p.lng,
+      count:1
+    });
+  }else{
+    g.count++;
+  }
 });
 
-draw();
-</script>
+map.setView([groups[0].lat,groups[0].lng],16);
 
+for(const g of groups){
+  const labelData = await getLabel(g.lat,g.lng);
+  const current = labelData?.label_true ?? null;
+
+  const marker = L.circleMarker([g.lat,g.lng],{
+    radius:8,
+    color:"#333",
+    fillOpacity:0.7
+  }).addTo(map);
+
+  function popupHTML(active){
+    return `
+      <b>正解ラベル</b><br>
+      <button class="label-btn step ${active==="step"?"active step":""}">段差</button>
+      <button class="label-btn curve ${active==="curve"?"active curve":""}">カーブ</button>
+      <button class="label-btn flat ${active==="flat"?"active flat":""}">平地</button>
+    `;
+  }
+
+  marker.bindPopup(popupHTML(current));
+
+  marker.on("popupopen", e=>{
+    const el = e.popup.getElement();
+
+    el.querySelectorAll(".label-btn").forEach(btn=>{
+      btn.onclick = async ()=>{
+        const label = btn.classList.contains("step")
+          ? "step"
+          : btn.classList.contains("curve")
+          ? "curve"
+          : "flat";
+
+        const newLabel = await saveLabel(g.lat,g.lng,label);
+        marker.setPopupContent(popupHTML(newLabel));
+      };
+    });
+  });
+}
+</script>
 </body>
 </html>
