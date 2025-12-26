@@ -261,16 +261,19 @@ function draw(){
           m.setStyle({ color: markerColor(label), fillColor: markerColor(label) });
           m.setPopupContent(popupHTML(label));
 
-          await addDoc(collection(db,"labels"),{
-            lat:g.lat,
-            lng:g.lng,
-            label_true:label,
-            type_detected:type,
-            avgDiff:g.sumDiff/g.count,
-            maxDiff:g.maxDiff,
-            sessionId:selectedSession,
-            updatedAt:new Date().toISOString()
-          });
+            await addDoc(collection(db,"labels"),{
+              lat: sample.lat,
+              lng: sample.lng,
+              label_true: label,
+              type_detected: sample.type,
+              diff: sample.diff,
+              x: sample.x,
+              y: sample.y,
+              z: sample.z,
+              angleDiff: sample.angleDiff,
+              sessionId: sessionId,
+              updatedAt: new Date().toISOString()
+            });
         };
       });
     });
