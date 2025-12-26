@@ -183,24 +183,35 @@ function draw(){
 
   const groups = [];
 
-  data.forEach(p=>{
-    let g = groups.find(g=>distance(p.lat,p.lng,g.lat,g.lng)<5);
-    if(!g){
-      groups.push({
-        lat:p.lat,
-        lng:p.lng,
-        count:1,
-        sumDiff:p.diff,
-        maxDiff:p.diff,
-        typeCount:{[p.type]:1}
-      });
-    } else {
-      g.count++;
-      g.sumDiff += p.diff;
-      g.maxDiff = Math.max(g.maxDiff,p.diff);
-      g.typeCount[p.type] = (g.typeCount[p.type]||0)+1;
-    }
+  data.forEach(p => {
+  // 5m以内、もしくは15m以内かつZ軸誤差1以下で同じグループにまとめる
+  let g = groups.find(g => {
+    const d = distance(p.lat, p.lng, g.lat, g.lng);
+    const dz = Math.abs(p.z - g.avgZ || 0); // g.avgZがあれば比較
+    return d < 5 || (d < 15 && dz < 1.0);
   });
+
+  if (!g) {
+    groups.push({
+      lat: p.lat,
+      lng: p.lng,
+      avgZ: p.z,
+      count: 1,
+      sumDiff: p.diff,
+      maxDiff: p.diff,
+      typeCount: { [p.type]: 1 }
+    });
+  } else {
+    // グループ情報を更新
+    g.count++;
+    g.sumDiff += p.diff;
+    g.maxDiff = Math.max(g.maxDiff, p.diff);
+    g.typeCount[p.type] = (g.typeCount[p.type] || 0) + 1;
+
+    // Z軸平均を更新
+    g.avgZ = g.avgZ + (p.z - g.avgZ) / g.count;
+  }
+});
 
   map.setView([groups[0].lat,groups[0].lng],16);
 

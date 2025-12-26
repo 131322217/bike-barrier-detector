@@ -102,10 +102,10 @@ function handleMotion(e){
       `diff=${diff.toFixed(2)} dz=${dz.toFixed(2)}`;
 
     const sample = {
-      x: curr.x,
-      y: curr.y,
-      z: curr.z,
-      diff,
+      x: parseFloat(curr.x.toFixed(2)),
+      y: parseFloat(curr.y.toFixed(2)),
+      z: parseFloat(curr.z.toFixed(2)),
+      diff: parseFloat(diff.toFixed(2)),
       lat: lastPosition.latitude,
       lng: lastPosition.longitude,
       timestamp: new Date().toISOString(),
