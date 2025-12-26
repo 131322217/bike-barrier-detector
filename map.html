@@ -28,13 +28,8 @@ html, body { height:100%; margin:0; }
   font-weight:bold;
 }
 
-.panel-body {
-  margin-top:6px;
-}
-
-.hidden {
-  display:none;
-}
+.panel-body { margin-top:6px; }
+.hidden { display:none; }
 
 button, select {
   width:100%;
@@ -48,11 +43,25 @@ button, select {
 
 .legend { font-size:12px; margin-top:6px; }
 .box { width:12px; height:12px; display:inline-block; border-radius:50%; margin-right:4px; }
+
+#noData {
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  background:white;
+  padding:12px 20px;
+  border-radius:8px;
+  box-shadow:0 0 8px rgba(0,0,0,.3);
+  font-weight:bold;
+  display:none;
+}
 </style>
 </head>
 <body>
 
 <div id="map"></div>
+<div id="noData">データがありません</div>
 
 <div class="panel">
   <div class="panel-header">
@@ -67,7 +76,8 @@ button, select {
     <hr>
 
     <label><input type="checkbox" id="showStep" checked> 段差</label><br>
-    <label><input type="checkbox" id="showCurve" checked> カーブ</label>
+    <label><input type="checkbox" id="showCurve" checked> カーブ</label><br>
+    <label><input type="checkbox" id="showCandidate" checked> 段差候補</label>
 
     <hr>
 
@@ -79,6 +89,7 @@ button, select {
     <div class="legend">
       <div><span class="box" style="background:red"></span>段差</div>
       <div><span class="box" style="background:blue"></span>カーブ</div>
+      <div><span class="box" style="background:yellow"></span>段差候補</div>
     </div>
   </div>
 </div>
@@ -97,33 +108,37 @@ const db = getFirestore(app);
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let allData=[], markers=[];
-let selectedSession="all";
-let level=0.7;
+let allData = [], markers = [];
+let selectedSession = "all";
+let level = 0.7;
 
-/* ========== UI ========== */
-document.getElementById("toggleBtn").onclick=()=>{
+/* UI */
+const showStep = document.getElementById("showStep");
+const showCurve = document.getElementById("showCurve");
+const showCandidate = document.getElementById("showCandidate");
+const noDataBox = document.getElementById("noData");
+
+document.getElementById("toggleBtn").onclick = () => {
   document.getElementById("panelBody").classList.toggle("hidden");
 };
 
-document.getElementById("showStep").onchange=draw;
-document.getElementById("showCurve").onchange=draw;
-
-document.querySelectorAll(".levelBtn").forEach(b=>{
-  b.onclick=()=>{
-    document.querySelectorAll(".levelBtn").forEach(x=>x.classList.remove("active"));
+document.querySelectorAll(".levelBtn").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".levelBtn").forEach(x => x.classList.remove("active"));
     b.classList.add("active");
-    level=parseFloat(b.dataset.level);
+    level = parseFloat(b.dataset.level);
     draw();
   };
 });
 
-document.getElementById("sessionSelect").onchange=e=>{
-  selectedSession=e.target.value;
+document.getElementById("sessionSelect").onchange = e => {
+  selectedSession = e.target.value;
   draw();
 };
 
-/* ========== util ========== */
+showStep.onchange = showCurve.onchange = showCandidate.onchange = draw;
+
+/* util */
 function distance(a,b,c,d){
   const R=6371000;
   const dLat=(c-a)*Math.PI/180;
@@ -134,10 +149,10 @@ function distance(a,b,c,d){
   ));
 }
 
-/* ========== data ========== */
+/* load */
 async function load(){
-  const snap=await getDocs(collection(db,"raw_sessions"));
-  const arr=[];
+  const snap = await getDocs(collection(db,"raw_sessions"));
+  const arr = [];
   snap.forEach(d=>{
     d.data().logs?.forEach(l=>{
       if(l.isEvent) arr.push({...l, sessionId:d.data().sessionId});
@@ -146,57 +161,68 @@ async function load(){
   return arr;
 }
 
-/* ========== draw ========== */
+/* draw */
 function draw(){
   markers.forEach(m=>map.removeLayer(m));
-  markers=[];
+  markers = [];
 
-  let data=allData.filter(d =>
+  let data = allData.filter(d =>
     selectedSession==="all" || d.sessionId===selectedSession
   );
 
-  if(!showStep.checked) data=data.filter(d=>d.type!=="step");
-  if(!showCurve.checked) data=data.filter(d=>d.type!=="curve");
+  if(!showStep.checked) data = data.filter(d=>d.type!=="step");
+  if(!showCurve.checked) data = data.filter(d=>d.type!=="curve");
+  if(!showCandidate.checked) data = data.filter(d=>d.type!=="candidate");
 
-  if(data.length===0) return;
+  if(data.length === 0){
+    noDataBox.style.display = "block";
+    return;
+  } else {
+    noDataBox.style.display = "none";
+  }
 
-  const groups=[];
+  const groups = [];
 
   data.forEach(p=>{
-    let g=groups.find(g=>distance(p.lat,p.lng,g.lat,g.lng)<5);
+    let g = groups.find(g=>distance(p.lat,p.lng,g.lat,g.lng)<5);
     if(!g){
       groups.push({
-        lat:p.lat,lng:p.lng,
+        lat:p.lat,
+        lng:p.lng,
         count:1,
         sumDiff:p.diff,
         maxDiff:p.diff,
         typeCount:{[p.type]:1}
       });
-    }else{
+    } else {
       g.count++;
-      g.sumDiff+=p.diff;
-      g.maxDiff=Math.max(g.maxDiff,p.diff);
-      g.typeCount[p.type]=(g.typeCount[p.type]||0)+1;
+      g.sumDiff += p.diff;
+      g.maxDiff = Math.max(g.maxDiff,p.diff);
+      g.typeCount[p.type] = (g.typeCount[p.type]||0)+1;
     }
   });
 
   map.setView([groups[0].lat,groups[0].lng],16);
 
   groups.forEach(g=>{
+    let type="curve", color="blue";
     const ratio=(g.typeCount.step||0)/g.count;
-    const type=ratio>=level?"step":"curve";
-    const color=type==="step"?"red":"blue";
+
+    if(ratio>=level){
+      type="step"; color="red";
+    } else if((g.typeCount.candidate||0)>0){
+      type="candidate"; color="yellow";
+    }
 
     const m=L.circleMarker([g.lat,g.lng],{
       radius:8,color,fillColor:color,fillOpacity:0.7
     }).addTo(map);
 
     m.bindPopup(`
-    <b>${type==='step'?'段差':'カーブ'}</b><br> 
-    検出回数：${g.count} 回<br> 
-    平均 diff：${(g.sumDiff/g.count).toFixed(2)}<br>
-    最大 diff：${g.maxDiff.toFixed(2)}<br> 
-    <a href="detail.html?lat=${g.lat}&lng=${g.lng}" target="_blank">詳細データを見る</a> 
+      <b>${type==="step"?"段差":type==="curve"?"カーブ":"段差候補"}</b><br>
+      検出数：${g.count}<br>
+      平均diff：${(g.sumDiff/g.count).toFixed(2)}<br>
+      最大diff：${g.maxDiff.toFixed(2)}
     `);
 
     markers.push(m);
@@ -205,6 +231,7 @@ function draw(){
 
 /* init */
 allData = await load();
+
 const sel=document.getElementById("sessionSelect");
 sel.innerHTML='<option value="all">すべて</option>';
 [...new Set(allData.map(d=>d.sessionId))].forEach(s=>{
@@ -212,6 +239,7 @@ sel.innerHTML='<option value="all">すべて</option>';
   o.value=s; o.textContent=s;
   sel.appendChild(o);
 });
+
 draw();
 </script>
 </body>

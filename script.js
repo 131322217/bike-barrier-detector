@@ -17,8 +17,7 @@ const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
 /* ===== 設定 ===== */
-const STEP_DIFF = 40;
-const CURVE_DIFF = 40;
+const STEP_DIFF = 50;
 const Z_THRESHOLD = 15;
 const DISTANCE_FILTER_M = 5;
 const PRE_N = 3;
@@ -34,8 +33,6 @@ let prevAcc = null;
 let recentSamples = [];
 let eventMarkers = [];
 let lastEventTime = 0;
-
-/* ★ 追加：位置履歴 */
 let posHistory = [];
 
 /* ===== Utility ===== */
@@ -54,7 +51,6 @@ function distanceMeters(lat1,lng1,lat2,lng2){
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-/* ★ 角度計算 */
 function getAngle(p1, p2) {
   return Math.atan2(
     p2.lng - p1.lng,
@@ -98,11 +94,8 @@ function handleMotion(e){
     const dy = Math.abs(curr.y - prevAcc.y);
     const dz = Math.abs(curr.z - prevAcc.z);
 
-    /* ★ diff式変更 */
     const diff = Math.sqrt(
-      dx * dx +
-      dy * dy +
-      (dz * 2) * (dz * 2)
+      dx*dx + dy*dy + (dz*2)*(dz*2)
     );
 
     accelerationText.textContent =
@@ -124,7 +117,6 @@ function handleMotion(e){
     if(recentSamples.length > 50) recentSamples.shift();
 
     const now = Date.now();
-
     if (now - lastEventTime < EVENT_COOLDOWN) {
       prevAcc = curr;
       return;
@@ -137,54 +129,51 @@ function handleMotion(e){
       }
     }
 
-    /* ===== 段差 ===== */
-    if (diff > STEP_DIFF && dz > Z_THRESHOLD) {
-      sample.isEvent = true;
-      sample.type = "step";
-      lastEventTime = now;
+    /* ===== 判定ロジック ===== */
+    if (diff > STEP_DIFF) {
 
-      saveEvent(recentSamples.slice(-PRE_N));
+      let isCurve = false;
+      let angleDiff = 0;
 
-      L.marker([sample.lat, sample.lng], {
-        icon: L.divIcon({
-          html: "🔴",
-          className: "",
-          iconSize: [16,16],
-          iconAnchor: [8,16]
-        })
-      }).addTo(map)
-        .bindPopup(`段差<br>diff=${diff.toFixed(1)}<br>dz=${dz.toFixed(1)}`);
+      if (posHistory.length >= 3) {
+        const a1 = getAngle(posHistory[0], posHistory[1]);
+        const a2 = getAngle(posHistory[1], posHistory[2]);
+        angleDiff = Math.abs(a2 - a1);
+        if (angleDiff > 15) isCurve = true;
+      }
 
-      eventMarkers.push({ lat: sample.lat, lng: sample.lng });
-      logUI("段差検出");
-    }
-
-    /* ===== カーブ（ルート判定） ===== */
-    else if (posHistory.length >= 3) {
-      const a1 = getAngle(posHistory[0], posHistory[1]);
-      const a2 = getAngle(posHistory[1], posHistory[2]);
-      const angleDiff = Math.abs(a2 - a1);
-
-      if (angleDiff > 15 && diff > 20 && dz <= Z_THRESHOLD) {
-        sample.isEvent = true;
-        sample.type = "curve";
-        lastEventTime = now;
-
-        saveEvent(recentSamples.slice(-PRE_N));
+      // --- 段差 ---
+      if (dz > Z_THRESHOLD) {
+        sample.type = "step";
+        logUI("段差検出");
 
         L.marker([sample.lat, sample.lng], {
-          icon: L.divIcon({
-            html: "🔵",
-            className: "",
-            iconSize: [16,16],
-            iconAnchor: [8,16]
-          })
-        }).addTo(map)
-          .bindPopup(`カーブ<br>角度=${angleDiff.toFixed(1)}°`);
+          icon: L.divIcon({ html:"🔴", iconSize:[16,16], iconAnchor:[8,16] })
+        }).addTo(map);
 
-        eventMarkers.push({ lat: sample.lat, lng: sample.lng });
+      // --- カーブ ---
+      } else if (isCurve) {
+        sample.type = "curve";
         logUI("カーブ検出");
+
+        L.marker([sample.lat, sample.lng], {
+          icon: L.divIcon({ html:"🔵", iconSize:[16,16], iconAnchor:[8,16] })
+        }).addTo(map);
+
+      // --- 段差候補 ---
+      } else {
+        sample.type = "candidate";
+        logUI("段差候補");
+
+        L.marker([sample.lat, sample.lng], {
+          icon: L.divIcon({ html:"🟡", iconSize:[16,16], iconAnchor:[8,16] })
+        }).addTo(map);
       }
+
+      sample.isEvent = true;
+      lastEventTime = now;
+      saveEvent(recentSamples.slice(-PRE_N));
+      eventMarkers.push({ lat: sample.lat, lng: sample.lng });
     }
   }
 
@@ -207,29 +196,15 @@ function startGPS(){
 
       statusText.textContent = "測定中";
     },
-    err=>{
-      statusText.textContent = "GPS取得失敗";
-    },
+    ()=> statusText.textContent = "GPS取得失敗",
     { enableHighAccuracy:true }
   );
 }
 
-/* ===== Permission ===== */
-async function requestMotionPermission(){
-  if(typeof DeviceMotionEvent?.requestPermission === "function"){
-    const res = await DeviceMotionEvent.requestPermission();
-    return res === "granted";
-  }
-  return true;
-}
-
-/* ===== Start / Stop ===== */
+/* ===== Start ===== */
 startStopBtn.addEventListener("click", async ()=>{
-  const ok = await requestMotionPermission();
-  if(!ok){
-    alert("加速度センサの許可が必要です");
-    return;
-  }
+  const ok = await DeviceMotionEvent?.requestPermission?.() ?? true;
+  if(!ok) return alert("加速度センサの許可が必要です");
 
   if(!isMeasuring){
     isMeasuring = true;
@@ -237,12 +212,12 @@ startStopBtn.addEventListener("click", async ()=>{
     prevAcc = null;
     recentSamples = [];
     eventMarkers = [];
-    startStopBtn.textContent = "測定終了";
     startGPS();
     window.addEventListener("devicemotion", handleMotion);
+    startStopBtn.textContent = "測定終了";
   } else {
     isMeasuring = false;
-    startStopBtn.textContent = "測定開始";
     window.removeEventListener("devicemotion", handleMotion);
+    startStopBtn.textContent = "測定開始";
   }
 });
