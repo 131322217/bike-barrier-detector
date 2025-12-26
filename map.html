@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <title>Barrier Map</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
 
   <style>
@@ -29,18 +28,14 @@
       width: 100%;
     }
 
-    .legend {
-      margin-top: 6px;
-      font-size: 12px;
+    .active {
+      background: #007bff;
+      color: white;
+      font-weight: bold;
     }
 
-    .box {
-      display: inline-block;
-      width: 12px;
-      height: 12px;
-      margin-right: 4px;
-      border-radius: 50%;
-    }
+    .legend { margin-top: 6px; font-size: 12px; }
+    .box { width:12px; height:12px; display:inline-block; border-radius:50%; margin-right:4px; }
   </style>
 </head>
 <body>
@@ -48,23 +43,21 @@
 <div id="map"></div>
 
 <div class="panel">
-  <b>セッション選択</b><br>
-  <select id="sessionSelect" onchange="changeSession(this.value)">
-    <option value="all">すべて</option>
-  </select>
+  <b>セッション</b>
+  <select id="sessionSelect"></select>
 
   <hr>
 
-  <b>表示切替</b><br>
+  <b>表示</b><br>
   <label><input type="checkbox" id="showStep" checked> 段差</label><br>
   <label><input type="checkbox" id="showCurve" checked> カーブ</label>
 
   <hr>
 
   <b>段差信頼度</b><br>
-  <button onclick="setLevel(0.6)">6割</button>
-  <button onclick="setLevel(0.7)">7割</button>
-  <button onclick="setLevel(0.8)">8割</button>
+  <button class="levelBtn" data-level="0.6">6割</button>
+  <button class="levelBtn active" data-level="0.7">7割</button>
+  <button class="levelBtn" data-level="0.8">8割</button>
 
   <div class="legend">
     <div><span class="box" style="background:red"></span>段差</div>
@@ -73,191 +66,132 @@
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-/* ===== Firebase ===== */
 const app = initializeApp({
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
-/* ===== Map ===== */
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-/* ===== State ===== */
 let allData = [];
 let markers = [];
-let sessions = [];
 let selectedSession = "all";
 let level = 0.7;
 
-/* ===== Utils ===== */
-function distanceMeters(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat/2)**2 +
-    Math.cos(lat1*Math.PI/180) *
-    Math.cos(lat2*Math.PI/180) *
-    Math.sin(dLng/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(a));
+/* ===== util ===== */
+function distanceMeters(a,b,c,d){
+  const R=6371000;
+  const dLat=(c-a)*Math.PI/180;
+  const dLng=(d-b)*Math.PI/180;
+  const x=Math.sin(dLat/2)**2+
+    Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
 }
 
-/* ===== Load Firestore ===== */
-async function loadData() {
-  const snapshot = await getDocs(collection(db, "raw_sessions"));
-  const points = [];
-
-  snapshot.forEach(doc => {
-    const data = doc.data();
-    if (!data.logs) return;
-
-    data.logs.forEach(log => {
-      if (log.isEvent && log.lat && log.lng) {
-        points.push({
-          lat: log.lat,
-          lng: log.lng,
-          diff: log.diff,
-          type: log.type,
-          sessionId: data.sessionId
-        });
+/* ===== load ===== */
+async function loadData(){
+  const snap = await getDocs(collection(db,"raw_sessions"));
+  const arr=[];
+  snap.forEach(d=>{
+    d.data().logs?.forEach(l=>{
+      if(l.isEvent){
+        arr.push({...l, sessionId:d.data().sessionId});
       }
     });
   });
-
-  return points;
+  return arr;
 }
 
-/* ===== Session list ===== */
-function extractSessions(data) {
-  const set = new Set();
-  data.forEach(d => set.add(d.sessionId));
-  return Array.from(set);
-}
+/* ===== draw ===== */
+function draw(){
+  markers.forEach(m=>map.removeLayer(m));
+  markers=[];
 
-function setupSessionSelector() {
-  const select = document.getElementById("sessionSelect");
-  sessions.forEach(s => {
-    const opt = document.createElement("option");
-    opt.value = s;
-    opt.textContent = s;
-    select.appendChild(opt);
+  let data = allData.filter(d =>
+    selectedSession==="all" || d.sessionId===selectedSession
+  );
+
+  if(!document.getElementById("showStep").checked)
+    data = data.filter(d=>d.type!=="step");
+
+  if(!document.getElementById("showCurve").checked)
+    data = data.filter(d=>d.type!=="curve");
+
+  if(data.length===0) return;
+
+  const groups=[];
+
+  data.forEach(p=>{
+    let g=groups.find(g=>distanceMeters(p.lat,p.lng,g.lat,g.lng)<5);
+    if(!g){
+      groups.push({
+        lat:p.lat,lng:p.lng,
+        count:1,
+        sumDiff:p.diff,
+        maxDiff:p.diff,
+        typeCount:{[p.type]:1}
+      });
+    }else{
+      g.count++;
+      g.sumDiff+=p.diff;
+      g.maxDiff=Math.max(g.maxDiff,p.diff);
+      g.typeCount[p.type]=(g.typeCount[p.type]||0)+1;
+    }
+  });
+
+  map.setView([groups[0].lat,groups[0].lng],16);
+
+  groups.forEach(g=>{
+    const ratio=(g.typeCount.step||0)/g.count;
+    const type=ratio>=level?"step":"curve";
+    const color=type==="step"?"red":"blue";
+
+    const m=L.circleMarker([g.lat,g.lng],{
+      radius:8,color,fillColor:color,fillOpacity:0.7
+    }).addTo(map);
+
+    markers.push(m);
   });
 }
 
-window.changeSession = v => {
-  selectedSession = v;
+/* ===== UI ===== */
+document.getElementById("showStep").onchange = draw;
+document.getElementById("showCurve").onchange = draw;
+
+document.querySelectorAll(".levelBtn").forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll(".levelBtn").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    level=parseFloat(btn.dataset.level);
+    draw();
+  };
+});
+
+document.getElementById("sessionSelect").onchange=e=>{
+  selectedSession=e.target.value;
   draw();
 };
 
-/* ===== Grouping ===== */
-function groupPoints(points) {
-  const groups = [];
-
-  points.forEach(p => {
-    let found = false;
-
-    for (const g of groups) {
-      const d = distanceMeters(p.lat, p.lng, g.lat, g.lng);
-      if (d <= 5) {
-        g.count++;
-        g.sumLat += p.lat;
-        g.sumLng += p.lng;
-        g.sumDiff += p.diff;
-        g.maxDiff = Math.max(g.maxDiff, p.diff);
-        g.typeCount[p.type] = (g.typeCount[p.type] || 0) + 1;
-        g.lat = g.sumLat / g.count;
-        g.lng = g.sumLng / g.count;
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) {
-      groups.push({
-        lat: p.lat,
-        lng: p.lng,
-        sumLat: p.lat,
-        sumLng: p.lng,
-        sumDiff: p.diff,
-        maxDiff: p.diff,
-        count: 1,
-        typeCount: { [p.type]: 1 }
-      });
-    }
-  });
-
-  return groups;
-}
-
-/* ===== Draw ===== */
-function draw() {
-  markers.forEach(m => map.removeLayer(m));
-  markers = [];
-
-  let data = [...allData];
-
-  // セッション絞り込み
-  if (selectedSession !== "all") {
-    data = data.filter(d => d.sessionId === selectedSession);
-  }
-
-  // 表示ON/OFF
-  const showStep = document.getElementById("showStep").checked;
-  const showCurve = document.getElementById("showCurve").checked;
-
-  data = data.filter(d => {
-    if (d.type === "step" && showStep) return true;
-    if (d.type === "curve" && showCurve) return true;
-    return false;
-  });
-
-  const groups = groupPoints(data);
-
-  if (groups.length === 0) {
-    map.setView([35.681236, 139.767125], 13);
-    return;
-  }
-
-  map.setView([groups[0].lat, groups[0].lng], 16);
-
-  groups.forEach(g => {
-    const stepRatio = (g.typeCount["step"] || 0) / g.count;
-    const type = stepRatio >= level ? "step" : "curve";
-    const color = type === "step" ? "red" : "blue";
-
-    const marker = L.circleMarker([g.lat, g.lng], {
-      radius: 8,
-      color,
-      fillColor: color,
-      fillOpacity: 0.7
-    }).addTo(map);
-
-    marker.bindPopup(`
-      <b>${type === "step" ? "段差" : "カーブ"}</b><br>
-      回数：${g.count}<br>
-      平均diff：${(g.sumDiff / g.count).toFixed(2)}<br>
-      最大diff：${g.maxDiff.toFixed(2)}
-    `);
-
-    markers.push(marker);
-  });
-}
-
-/* ===== Init ===== */
+/* ===== init ===== */
 allData = await loadData();
-sessions = extractSessions(allData);
-setupSessionSelector();
+const sessions=[...new Set(allData.map(d=>d.sessionId))];
+
+const sel=document.getElementById("sessionSelect");
+sel.innerHTML='<option value="all">すべて</option>';
+sessions.forEach(s=>{
+  const o=document.createElement("option");
+  o.value=s;
+  o.textContent=s;
+  sel.appendChild(o);
+});
+
 draw();
-
-window.setLevel = l => { level = l; draw(); };
 </script>
-
 </body>
 </html>
