@@ -148,6 +148,7 @@ function handleMotion(e){
       L.marker([sample.lat, sample.lng], {
         icon: L.divIcon({
           html: "🔴",
+          className: "",
           iconSize: [16,16],
           iconAnchor: [8,16]
         })
@@ -174,6 +175,7 @@ function handleMotion(e){
         L.marker([sample.lat, sample.lng], {
           icon: L.divIcon({
             html: "🔵",
+            className: "",
             iconSize: [16,16],
             iconAnchor: [8,16]
           })
