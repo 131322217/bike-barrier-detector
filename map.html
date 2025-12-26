@@ -17,9 +17,9 @@ html, body { height:100%; margin:0; }
   border:1px solid #ccc;
   cursor:pointer;
 }
-.label-btn.active.step { background:#ff4d4d; color:white; }
+.label-btn.active.step  { background:#ff4d4d; color:white; }
 .label-btn.active.curve { background:#4d79ff; color:white; }
-.label-btn.active.flat { background:#aaa; color:white; }
+.label-btn.active.flat  { background:#4caf50; color:white; }
 </style>
 </head>
 <body>
@@ -60,6 +60,13 @@ function distance(a,b,c,d){
   ));
 }
 
+function markerColor(label){
+  if(label==="step") return "#ff4d4d";
+  if(label==="curve") return "#4d79ff";
+  if(label==="flat") return "#4caf50";
+  return "#000";
+}
+
 /* ===== load raw events ===== */
 async function loadEvents(){
   const snap = await getDocs(collection(db,"raw_sessions"));
@@ -83,14 +90,14 @@ async function getLabel(lat,lng){
   );
   const snap = await getDocs(q);
   if(snap.empty) return null;
-  return { id:snap.docs[0].id, ...snap.docs[0].data() };
+  return snap.docs[0].data();
 }
 
 async function saveLabel(lat,lng,label){
   const existing = await getLabel(lat,lng);
 
-  if(existing && existing.label_true === label){
-    // 同じものを押した → 解除
+  // 同じラベル → 解除
+  if(existing?.label_true === label){
     await addDoc(collection(db,"labels"),{
       lat,lng,
       label_true:null,
@@ -110,18 +117,23 @@ async function saveLabel(lat,lng,label){
 /* ===== main ===== */
 const data = await loadEvents();
 
-/* グループ化（簡易） */
+/* 簡易クラスタ */
 const groups = [];
 data.forEach(p=>{
   let g = groups.find(g=>distance(p.lat,p.lng,g.lat,g.lng)<5);
+  const accel = Math.sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
+
   if(!g){
     groups.push({
       lat:p.lat,
       lng:p.lng,
-      count:1
+      accelSum: accel,
+      dz: Math.abs(p.z),
+      detected: p.type
     });
   }else{
-    g.count++;
+    g.accelSum += accel;
+    g.dz = Math.max(g.dz, Math.abs(p.z));
   }
 });
 
@@ -133,12 +145,18 @@ for(const g of groups){
 
   const marker = L.circleMarker([g.lat,g.lng],{
     radius:8,
-    color:"#333",
-    fillOpacity:0.7
+    color: markerColor(current),
+    fillColor: markerColor(current),
+    fillOpacity:0.8
   }).addTo(map);
 
   function popupHTML(active){
     return `
+      <b>イベント情報</b><br>
+      加速度合計：${g.accelSum.toFixed(1)}<br>
+      dz：${g.dz.toFixed(2)}<br>
+      機械判定：${g.detected ?? "なし"}<br>
+      <hr>
       <b>正解ラベル</b><br>
       <button class="label-btn step ${active==="step"?"active step":""}">段差</button>
       <button class="label-btn curve ${active==="curve"?"active curve":""}">カーブ</button>
@@ -150,7 +168,6 @@ for(const g of groups){
 
   marker.on("popupopen", e=>{
     const el = e.popup.getElement();
-
     el.querySelectorAll(".label-btn").forEach(btn=>{
       btn.onclick = async ()=>{
         const label = btn.classList.contains("step")
@@ -160,6 +177,12 @@ for(const g of groups){
           : "flat";
 
         const newLabel = await saveLabel(g.lat,g.lng,label);
+
+        marker.setStyle({
+          color: markerColor(newLabel),
+          fillColor: markerColor(newLabel)
+        });
+
         marker.setPopupContent(popupHTML(newLabel));
       };
     });
