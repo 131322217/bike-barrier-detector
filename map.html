@@ -17,7 +17,7 @@ html, body { height:100%; margin:0; }
   border-radius:8px;
   box-shadow:0 0 6px rgba(0,0,0,.25);
   z-index:1000;
-  width:260px;
+  width: 150px;  
   font-size:13px;
 }
 
@@ -34,6 +34,20 @@ button { width:100%; margin-top:4px; padding:4px; cursor:pointer; }
 .flat { background:#4caf50; color:white; }
 
 .mode { margin-bottom:6px; }
+
+.panel-toggle {
+  display:block;
+  width:100%;
+  text-align:center;
+  background:#eee;
+  padding:4px 0;
+  cursor:pointer;
+  border-radius:4px;
+  margin-bottom:6px;
+  font-size:12px;
+}
+
+#panelContent { display:block; }
 </style>
 </head>
 
@@ -41,34 +55,42 @@ button { width:100%; margin-top:4px; padding:4px; cursor:pointer; }
 <div id="map"></div>
 
 <div class="panel">
-<h3>表示モード</h3>
-<div class="mode">
-<label><input type="radio" name="viewMode" value="auto" checked> 自動判定</label><br>
-<label><input type="radio" name="viewMode" value="gt"> 正解（GT）</label>
-</div>
+  <div class="panel-toggle" id="togglePanel">▲ パネルを閉じる</div>
+  <div id="panelContent">
+    <h3>表示モード</h3>
+    <div class="mode">
+      <label><input type="radio" name="viewMode" value="auto" checked> 自動判定</label><br>
+      <label><input type="radio" name="viewMode" value="gt"> 正解（GT）</label>
+    </div>
 
-<hr>
+    <hr>
 
-<h3>自動判定（表示）</h3>
-<label><input type="checkbox" id="f_step" checked> 段差</label><br>
-<label><input type="checkbox" id="f_curve" checked> カーブ</label><br>
-<label><input type="checkbox" id="f_hill" checked> 坂</label><br>
-<label><input type="checkbox" id="f_flat" checked> 平地</label>
+    <h3>自動判定（表示）</h3>
+    <label><input type="checkbox" id="f_step" checked> 段差</label><br>
+    <label><input type="checkbox" id="f_curve" checked> カーブ</label><br>
+    <label><input type="checkbox" id="f_hill" checked> 坂</label><br>
+    <label><input type="checkbox" id="f_flat" checked> 平地</label>
 
-<hr>
+    <hr>
 
-<button id="bulkGT">未入力を自動判定で一括GT保存</button>
+    <button id="bulkGT">一括GT保存</button>
+  </div>
 
-<hr>
+  <hr>
 
-<h3>凡例</h3>
-<div class="legend">
-<div><span class="box" style="background:red"></span>段差</div>
-<div><span class="box" style="background:blue"></span>カーブ</div>
-<div><span class="box" style="background:orange"></span>坂</div>
-<div><span class="box" style="background:green"></span>平地</div>
-<div><span class="box" style="background:#999"></span>未入力</div>
-</div>
+  <h3>凡例</h3>
+  <div class="legend">
+    <div><span class="box" style="background:red"></span>段差</div>
+    <div><span class="box" style="background:blue"></span>カーブ</div>
+    <div><span class="box" style="background:orange"></span>坂</div>
+    <div><span class="box" style="background:green"></span>平地</div>
+  </div>
+  <div class="legend" style="display:flex; gap:6px;">
+    <div style="display:flex; align-items:center;"><span class="box" style="background:rgba(255,0,0,0.4)"></span></div>
+    <div style="display:flex; align-items:center;"><span class="box" style="background:rgba(0,0,255,0.4)"></span></div>
+    <div style="display:flex; align-items:center;"><span class="box" style="background:rgba(255,165,0,0.4)"></span></div>
+    <div style="display:flex; align-items:center;"><span class="box" style="background:rgba(0,128,0,0.4)"></span>未入力</div>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -100,25 +122,17 @@ let allEvents = [];
 let gtMap = {}; // eventId -> groundTruth
 
 /* ===== Utils ===== */
-// 色を返す関数を変更：未入力なら薄くする
 function colorByLabel(label, unlabeled=false) {
-  const colors = {
-    step: "red",
-    curve: "blue",
-    hill: "orange",
-    flat: "green"
-  };
+  const colors = { step: "red", curve: "blue", hill: "orange", flat: "green" };
   const baseColor = colors[label] || "#999";
 
   if (unlabeled) {
-    // 半透明で薄く表示
     if (baseColor === "red") return "rgba(255,0,0,0.4)";
     if (baseColor === "blue") return "rgba(0,0,255,0.4)";
     if (baseColor === "orange") return "rgba(255,165,0,0.4)";
     if (baseColor === "green") return "rgba(0,128,0,0.4)";
     return "rgba(153,153,153,0.4)";
   }
-
   return baseColor;
 }
 
@@ -172,8 +186,8 @@ function draw() {
       label = ev.autoLabel;
     }
 
-    const unlabeled = !gtMap[ev.id]; // GT未入力かどうか
-    const color = colorByLabel(label, unlabeled); // ←ここで薄くする
+    const unlabeled = !gtMap[ev.id];
+    const color = colorByLabel(label, unlabeled);
 
     const m = L.circleMarker([ev.lat, ev.lng], {
       radius: 7,
@@ -182,10 +196,7 @@ function draw() {
       fillOpacity: 0.8
     }).addTo(map);
 
-    m.meta = {
-      autoLabel: ev.autoLabel,
-      gtLabel: gtMap[ev.id] || null
-    };
+    m.meta = { autoLabel: ev.autoLabel, gtLabel: gtMap[ev.id] || null };
 
     m.bindPopup(`
 <b>自動判定</b>: ${ev.autoLabel}<br>
@@ -262,11 +273,22 @@ document.getElementById("bulkGT").onclick = async () => {
 ["f_step","f_curve","f_hill","f_flat"].forEach(id =>
   document.getElementById(id).onchange = applyFilter
 );
+document.querySelectorAll("input[name=viewMode]").forEach(r => r.onchange = draw);
 
-document.querySelectorAll("input[name=viewMode]").forEach(r =>
-  r.onchange = draw
-);
+/* ===== Panel Toggle ===== */
+const toggleBtn = document.getElementById("togglePanel");
+const panelContent = document.getElementById("panelContent");
+toggleBtn.onclick = () => {
+  if (panelContent.style.display === "none") {
+    panelContent.style.display = "block";
+    toggleBtn.textContent = "▲ パネルを閉じる";
+  } else {
+    panelContent.style.display = "none";
+    toggleBtn.textContent = "▼ パネルを開く";
+  }
+};
 
+/* ===== Load and Draw ===== */
 allEvents = await loadEvents();
 await loadGT();
 await setInitialView(allEvents);
