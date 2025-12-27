@@ -13,18 +13,16 @@ button { margin:5px; padding:6px 12px; border-radius:4px; cursor:pointer; }
 </head>
 <body>
 
-<h1>散布図切替（Plotly版）</h1>
+<h1>判定式可視化（diff × xyMean）</h1>
 <div id="scatterPlot"></div>
 
 <div>
-  <button data-x="diff" data-y="angleDiff">diff × angleDiff</button>
-  <button data-x="diff" data-y="z">diff × z</button>
-  <button data-x="diff" data-y="x">diff × x</button>
-  <button data-x="diff" data-y="y">diff × y</button>
-  <button data-x="diff" data-y="xyMean">diff × |x+y|/2</button>
-  <button data-x="xyMean" data-y="z">|x+y|/2 × z</button>
-  <button data-x="angleDiff" data-y="xyMean">angleDiff × |x+y|/2</button>
-  <button data-x="x" data-y="y">x × y</button>
+  <button id="btnDiffXY">diff × xyMean</button>
+  <button id="btnDiffHist">diff 分布</button>
+</div>
+
+<div style="margin-top:15px;">
+  <button id="downloadBtn">CSVダウンロード</button>
 </div>
 
 <script type="module">
@@ -39,9 +37,9 @@ const app = initializeApp({
 const db = getFirestore(app);
 
 /* ラベル定義 */
-const KEYS = ["step","curve","flat"];
-const LABEL = { step:"段差", curve:"カーブ", flat:"カーブ+段差" };
-const COLOR = { step:"red", curve:"blue", flat:"green" };
+const KEYS = ["step","curve","flat","hill"];
+const LABEL = { step:"段差", curve:"カーブ", flat:"平地", hill:"坂" };
+const COLOR = { step:"red", curve:"blue", flat:"green", hill:"orange" };
 
 /* データ取得 */
 const snap = await getDocs(collection(db,"labels"));
@@ -50,62 +48,138 @@ snap.docs.forEach(d => {
   const r = d.data();
   if(r.samples?.length){
     r.samples.forEach(s=>{
-      rows.push({...r,...s, xyMean:(Math.abs(s.x)+Math.abs(s.y))/2});
+      rows.push({
+        ...r,
+        ...s,
+        xyMean:(Math.abs(s.x)+Math.abs(s.y))/2
+      });
     });
   } else {
-    rows.push({...r, xyMean:(Math.abs(r.x)+Math.abs(r.y))/2});
+    rows.push({
+      ...r,
+      xyMean:(Math.abs(r.x)+Math.abs(r.y))/2
+    });
   }
 });
 
 if(rows.length===0) alert("labels にデータがありません");
 
-/* Plotly用描画関数 */
-function drawScatter(xField, yField){
+/* =========================
+   diff × xyMean 散布図
+========================= */
+function drawDiffXY(){
   const data = KEYS.map(k => {
-    const filtered = rows.filter(r => r.label_true===k && typeof r[xField]==="number" && typeof r[yField]==="number");
-
-    // 重なりを大きさで表現する
-    const sizeMap = {};
-    filtered.forEach(r=>{
-      const key = `${r[xField]}_${r[yField]}`;
-      sizeMap[key] = (sizeMap[key]||0) + 1;
-    });
+    const filtered = rows.filter(r =>
+      r.label_true === k &&
+      typeof r.diff === "number" &&
+      typeof r.xyMean === "number"
+    );
 
     return {
-      x: filtered.map(r=>r[xField]),
-      y: filtered.map(r=>r[yField]),
-      mode: 'markers',
-      type: 'scattergl', // 高速＆高解像度
+      x: filtered.map(r => r.diff),
+      y: filtered.map(r => r.xyMean),
+      mode: "markers",
+      type: "scattergl",
       name: LABEL[k],
       marker: {
         color: COLOR[k],
-        size: filtered.map(r=>{
-          const key = `${r[xField]}_${r[yField]}`;
-          return 5 + sizeMap[key]*2; // 重なりに応じてサイズ大きく
-        }),
-        opacity:0.7
+        size: 6,
+        opacity: 0.7
       }
     };
   });
 
   const layout = {
-    xaxis: { title:xField },
-    yaxis: { title:yField },
-    legend:{ orientation:"h" },
-    margin:{ t:40, l:50, r:20, b:50 },
+    xaxis: { title: "diff" },
+    yaxis: { title: "|x + y| / 2 (xyMean)" },
+    legend: { orientation:"h" },
+    margin:{ t:40, l:60, r:20, b:60 },
     hovermode:"closest"
   };
 
-  Plotly.newPlot('scatterPlot', data, layout, {responsive:true});
+  Plotly.newPlot("scatterPlot", data, layout, {responsive:true});
+}
+
+/* =========================
+   diff 分布ヒストグラム
+========================= */
+function drawDiffHist(){
+  const data = KEYS.map(k => {
+    const filtered = rows.filter(r =>
+      r.label_true === k &&
+      typeof r.diff === "number"
+    );
+
+    return {
+      x: filtered.map(r => r.diff),
+      type: "histogram",
+      name: LABEL[k],
+      opacity: 0.6,
+      marker: { color: COLOR[k] },
+      autobinx: true
+    };
+  });
+
+  const layout = {
+    xaxis: { title: "diff" },
+    yaxis: { title: "count" },
+    barmode: "overlay",
+    legend: { orientation:"h" },
+    margin:{ t:40, l:60, r:20, b:60 }
+  };
+
+  Plotly.newPlot("scatterPlot", data, layout, {responsive:true});
 }
 
 /* 初期表示 */
-drawScatter("diff","angleDiff");
+drawDiffXY();
 
-/* ボタン切替 */
-document.querySelectorAll("button").forEach(btn=>{
-  btn.onclick = ()=> drawScatter(btn.dataset.x, btn.dataset.y);
-});
+/* ボタン */
+document.getElementById("btnDiffXY").onclick = drawDiffXY;
+document.getElementById("btnDiffHist").onclick = drawDiffHist;
+
+/* ===== CSVダウンロード ===== */
+document.getElementById("downloadBtn").onclick = () => {
+  if(rows.length === 0) return alert("データがありません");
+
+  const header = ["label","event_index","sample_index","x","y","z","diff"];
+  const lines = [header.join(",")];
+
+  const events = {};
+  rows.forEach(r => {
+    const docId = r.docId || r.id || r.label_true + "_" + r.updatedAt;
+    if(!events[docId]){
+      events[docId] = {
+        label: r.label_true,
+        samples: r.samples?.length
+          ? r.samples
+          : [{x:r.x,y:r.y,z:r.z,diff:r.diff}]
+      };
+    }
+  });
+
+  Object.entries(events).forEach(([_, {label, samples}], event_index) => {
+    samples.forEach((s, sample_index) => {
+      lines.push([
+        label,
+        event_index,
+        sample_index,
+        s.x.toFixed(2),
+        s.y.toFixed(2),
+        s.z.toFixed(2),
+        s.diff.toFixed(2)
+      ].join(","));
+    });
+  });
+
+  const blob = new Blob([lines.join("\n")], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "scatter_data.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+};
 </script>
 
 </body>

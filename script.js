@@ -1,5 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import {
+  getFirestore,
+  collection,
+  addDoc
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
 /* ===== Firebase ===== */
 const firebaseConfig = {
@@ -17,11 +21,10 @@ const accelerationText = document.getElementById("accelerationText");
 const resultText = document.getElementById("resultText");
 
 /* ===== 設定 ===== */
-const STEP_DIFF = 50;
-const CURVE_DIFF = 45;
-const DISTANCE_FILTER_M = 5;
-const PRE_N = 3;
+const EVENT_DIFF_TRIGGER = 45;
+const PRE_N = 5;
 const EVENT_COOLDOWN = 1500;
+const DISTANCE_FILTER_M = 5;
 
 /* ===== 状態 ===== */
 let isMeasuring = false;
@@ -31,193 +34,201 @@ let userMarker = null;
 let lastPosition = null;
 let prevAcc = null;
 let recentSamples = [];
-let eventMarkers = [];
 let lastEventTime = 0;
-let posHistory = [];
+let eventMarkers = [];
 
-/* ===== Utility ===== */
-function logUI(msg){
+/* ===== Utils ===== */
+function logUI(msg) {
   resultText.textContent = msg;
 }
 
-function distanceMeters(lat1,lng1,lat2,lng2){
+function distanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;
-  const dLat = (lat2-lat1)*Math.PI/180;
-  const dLng = (lng2-lng1)*Math.PI/180;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
   const a =
-    Math.sin(dLat/2)**2 +
-    Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180) *
-    Math.sin(dLng/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-function popupHTML(currentType){
-  return `
-    <div style="text-align:center;">
-      <button class="label-btn step">段差</button>
-      <button class="label-btn curve">カーブ</button>
-      <button class="label-btn flat">平地</button>
-      <div style="margin-top:4px;">現在: ${currentType}</div>
-    </div>
-  `;
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 /* ===== Map ===== */
-function initMap(lat,lng){
-  if(map) return;
-  map = L.map("map").setView([lat,lng],17);
+function initMap(lat, lng) {
+  if (map) return;
+  map = L.map("map").setView([lat, lng], 17);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
-  userMarker = L.marker([lat,lng]).addTo(map);
+  userMarker = L.marker([lat, lng]).addTo(map);
 }
 
-function updateMap(lat,lng){
-  if(!map) initMap(lat,lng);
-  userMarker.setLatLng([lat,lng]);
+function updateMap(lat, lng) {
+  if (!map) initMap(lat, lng);
+  userMarker.setLatLng([lat, lng]);
+}
+
+/* ===== 特徴量 ===== */
+function calcFeatures(samples) {
+  let diffMax = 0;
+  let sumDx = 0, sumDy = 0, sumDz = 0;
+  let zSigns = [];
+
+  for (let i = 1; i < samples.length; i++) {
+    const p = samples[i - 1];
+    const c = samples[i];
+
+    const dx = Math.abs(c.x - p.x);
+    const dy = Math.abs(c.y - p.y);
+    const dz = Math.abs(c.z - p.z);
+
+    sumDx += dx;
+    sumDy += dy;
+    sumDz += dz;
+
+    diffMax = Math.max(diffMax, c.diff);
+    zSigns.push(Math.sign(c.z));
+  }
+
+  const total = sumDx + sumDy + sumDz || 1;
+
+  return {
+    diffMax,
+    sumDx,
+    sumDy,
+    sumDz,
+    xyRatio: (sumDx + sumDy) / total,
+    zRatio: sumDz / total,
+    zConsistency: zSigns.every(v => v > 0) || zSigns.every(v => v < 0)
+  };
+}
+
+/* ===== 分類 ===== */
+function classifyEvent(f) {
+  if (f.diffMax >= 50 && f.zRatio >= 0.6 && !f.zConsistency) return "step";
+  if (f.diffMax >= 45 && f.zRatio >= 0.6 && f.zConsistency) return "hill";
+  if (f.diffMax >= 35 && f.xyRatio >= 0.6) return "curve";
+  return "flat";
 }
 
 /* ===== Firestore ===== */
-async function saveEvent(samples){
-  await addDoc(collection(db,"raw_sessions"),{
+async function saveEvent(eventSamples, features, autoLabel) {
+  return await addDoc(collection(db, "raw_events"), {
     sessionId,
-    createdAt: new Date().toISOString(),
-    logs: samples
+    autoLabel,
+    features,
+    lat: eventSamples.at(-1).lat,
+    lng: eventSamples.at(-1).lng,
+    samples: eventSamples,
+    createdAt: new Date().toISOString()
   });
 }
 
-/* ===== Motion ===== */
-function handleMotion(e){
-  if(!isMeasuring || !lastPosition) return;
-  const acc = e.accelerationIncludingGravity;
-  if(!acc) return;
+/* ===== Marker ===== */
+function createMarker(sample, autoLabel, eventId) {
+  const color =
+    autoLabel === "step" ? "red" :
+    autoLabel === "hill" ? "orange" :
+    autoLabel === "curve" ? "blue" : "gray";
 
-  const curr = { x: acc.x||0, y: acc.y||0, z: acc.z||0 };
-  if(prevAcc){
-    const dx = Math.abs(curr.x - prevAcc.x);
-    const dy = Math.abs(curr.y - prevAcc.y);
-    const dz = Math.abs(curr.z - prevAcc.z);
+  const m = L.circleMarker([sample.lat, sample.lng], {
+    radius: 8,
+    color,
+    fillColor: color,
+    fillOpacity: 0.7
+  }).addTo(map);
+
+  m.bindPopup(`
+    <b>自動判定:</b> ${autoLabel}<br><br>
+    <b>正解入力</b><br>
+    <button onclick="saveGT('${eventId.id}','step')">段差</button>
+    <button onclick="saveGT('${eventId.id}','hill')">坂</button>
+    <button onclick="saveGT('${eventId.id}','curve')">カーブ</button>
+    <button onclick="saveGT('${eventId.id}','flat')">平地</button>
+  `);
+
+  eventMarkers.push({ lat: sample.lat, lng: sample.lng });
+}
+
+/* ===== 正解保存 ===== */
+window.saveGT = async (eventId, gt) => {
+  await addDoc(collection(db, "event_labels"), {
+    eventId,
+    groundTruth: gt,
+    labeledAt: new Date().toISOString()
+  });
+  alert("正解を保存しました");
+};
+
+/* ===== Motion ===== */
+function handleMotion(e) {
+  if (!isMeasuring || !lastPosition) return;
+  const acc = e.accelerationIncludingGravity;
+  if (!acc) return;
+
+  const curr = { x: acc.x || 0, y: acc.y || 0, z: acc.z || 0 };
+
+  if (prevAcc) {
+    const dx = curr.x - prevAcc.x;
+    const dy = curr.y - prevAcc.y;
+    const dz = curr.z - prevAcc.z;
     const diff = Math.sqrt(dx*dx + dy*dy + (dz*2)*(dz*2));
 
-    accelerationText.textContent = `diff=${diff.toFixed(2)} dz=${dz.toFixed(2)}`;
+    accelerationText.textContent = `diff=${diff.toFixed(1)}`;
 
     const sample = {
-      x: parseFloat(curr.x.toFixed(2)),
-      y: parseFloat(curr.y.toFixed(2)),
-      z: parseFloat(curr.z.toFixed(2)),
-      diff: parseFloat(diff.toFixed(2)),
-      lat: lastPosition.latitude,
-      lng: lastPosition.longitude,
-      timestamp: new Date().toISOString(),
-      isEvent: false,
-      type: null
+      x:+curr.x.toFixed(2),
+      y:+curr.y.toFixed(2),
+      z:+curr.z.toFixed(2),
+      diff:+diff.toFixed(2),
+      lat:lastPosition.latitude,
+      lng:lastPosition.longitude,
+      timestamp:new Date().toISOString()
     };
 
     recentSamples.push(sample);
-    if(recentSamples.length > 50) recentSamples.shift();
+    if (recentSamples.length > 50) recentSamples.shift();
 
     const now = Date.now();
-    if(now - lastEventTime < EVENT_COOLDOWN){
-      prevAcc = curr;
-      return;
-    }
+    if (now - lastEventTime > EVENT_COOLDOWN && diff >= EVENT_DIFF_TRIGGER) {
+      const eventSamples = recentSamples.slice(-PRE_N);
+      const features = calcFeatures(eventSamples);
+      const autoLabel = classifyEvent(features);
 
-    for(const m of eventMarkers){
-      if(distanceMeters(m.lat, m.lng, sample.lat, sample.lng) < DISTANCE_FILTER_M){
-        prevAcc = curr;
-        return;
-      }
-    }
+      saveEvent(eventSamples, features, autoLabel).then(ref => {
+        createMarker(sample, autoLabel, ref);
+      });
 
-    /* ===== 判定 ===== */
-    if(diff >= CURVE_DIFF){
-      if(diff >= STEP_DIFF){
-        sample.type = "step";
-        logUI("段差検出");
-        createMarker(sample,"red");
-      // } else {
-      //   sample.type = "curve";
-      //   logUI("カーブ検出");
-      //   createMarker(sample,"blue");
-      }
-      sample.isEvent = true;
       lastEventTime = now;
-      saveEvent(recentSamples.slice(-PRE_N));
-      eventMarkers.push({ lat: sample.lat, lng: sample.lng });
+      logUI(`${autoLabel} 検出`);
     }
   }
   prevAcc = curr;
 }
 
-/* ===== マーカー作成 + ポップアップ ===== */
-function createMarker(sample,color){
-  const marker = L.circleMarker([sample.lat, sample.lng],{
-    radius: 8,
-    color: color,
-    fillColor: color,
-    fillOpacity: 0.7
-  }).addTo(map);
-
-  marker.bindPopup(popupHTML(sample.type));
-
-  marker.on("click", ()=>{
-    marker.openPopup();
-    setTimeout(()=>{
-      const el = marker.getPopup().getElement();
-      el.querySelectorAll(".label-btn").forEach(btn=>{
-        btn.onclick = async ()=>{
-          const label = btn.classList.contains("step")?"step":
-                        btn.classList.contains("curve")?"curve":"flat";
-
-          marker.setStyle({ color:"yellow", fillColor:"yellow" });
-          marker.setPopupContent(popupHTML(label));
-
-          await addDoc(collection(db,"labels"),{
-            lat: sample.lat,
-            lng: sample.lng,
-            label_true: label,
-            type_detected: sample.type,
-            diff: sample.diff,
-            x: sample.x,
-            y: sample.y,
-            z: sample.z,
-            sessionId: sessionId,
-            updatedAt: new Date().toISOString()
-          });
-
-          logUI(`${label} を手動追加しました`);
-        };
-      });
-    },50);
-  });
-}
-
 /* ===== GPS ===== */
-function startGPS(){
+function startGPS() {
   navigator.geolocation.watchPosition(
-    pos=>{
+    pos => {
       lastPosition = pos.coords;
       updateMap(pos.coords.latitude, pos.coords.longitude);
-
-      posHistory.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, time: Date.now() });
-      if(posHistory.length>5) posHistory.shift();
-
       statusText.textContent = "測定中";
     },
-    ()=>statusText.textContent="GPS取得失敗",
-    { enableHighAccuracy:true }
+    () => statusText.textContent = "GPS失敗",
+    { enableHighAccuracy: true }
   );
 }
 
-/* ===== Start/Stop ===== */
-startStopBtn.addEventListener("click", async ()=>{
+/* ===== Start / Stop ===== */
+startStopBtn.onclick = async () => {
   const ok = await DeviceMotionEvent?.requestPermission?.() ?? true;
-  if(!ok) return alert("加速度センサの許可が必要です");
+  if (!ok) return alert("センサ許可が必要");
 
-  if(!isMeasuring){
+  if (!isMeasuring) {
     isMeasuring = true;
     sessionId = new Date().toISOString();
-    prevAcc = null;
     recentSamples = [];
     eventMarkers = [];
+    prevAcc = null;
     startGPS();
     window.addEventListener("devicemotion", handleMotion);
     startStopBtn.textContent = "測定終了";
@@ -226,4 +237,4 @@ startStopBtn.addEventListener("click", async ()=>{
     window.removeEventListener("devicemotion", handleMotion);
     startStopBtn.textContent = "測定開始";
   }
-});
+};

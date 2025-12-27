@@ -2,8 +2,9 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Barrier Map</title>
+<title>Barrier Map - Evaluation</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
 
 <style>
@@ -12,275 +13,181 @@ html, body { height:100%; margin:0; }
 
 .panel {
   position:absolute;
-  top:10px; left:50px;
+  top:10px; left:10px;
   background:white;
-  padding:8px;
+  padding:10px;
   border-radius:8px;
-  box-shadow:0 0 6px rgba(0,0,0,.2);
+  box-shadow:0 0 6px rgba(0,0,0,.25);
   z-index:1000;
-  width:220px;
+  width:260px;
+  font-size:13px;
 }
 
-.panel-header {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  font-weight:bold;
-}
-
-.panel-body { margin-top:6px; }
-.hidden { display:none; }
-
-button { width:100%; margin-top:4px; }
-
-.label-btn { padding:4px; }
-.step { background:#4caf50; color:white; }
-.curve { background:#ff9800; color:white; }
-.flat { background:#607d8b; color:white; }
-
-#noData {
-  position:absolute;
-  top:50%;
-  left:50%;
-  transform:translate(-50%,-50%);
-  background:white;
-  padding:12px 20px;
-  border-radius:8px;
-  box-shadow:0 0 8px rgba(0,0,0,.3);
-  font-weight:bold;
-  display:none;
-}
-.legend {
-  margin-top: 10px;
-  font-size: 12px;
+.panel h3 {
+  margin:0 0 6px;
+  font-size:14px;
 }
 
 .legend div {
-  display: flex;
-  align-items: center;
-  margin-bottom: 4px;
+  display:flex;
+  align-items:center;
+  margin-bottom:4px;
+}
+.box {
+  width:12px;
+  height:12px;
+  border-radius:50%;
+  margin-right:6px;
 }
 
-.box {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 6px;
+button {
+  width:100%;
+  margin-top:4px;
+  padding:4px;
 }
+
+.step { background:#f44336; color:white; }
+.curve { background:#2196f3; color:white; }
+.hill { background:orange; color:white; }
+.flat { background:#4caf50; color:white; }
 </style>
 </head>
+
 <body>
 
 <div id="map"></div>
-<div id="noData">データがありません</div>
 
 <div class="panel">
-  <div class="panel-header">
-    <span>表示設定</span>
-    <button id="toggleBtn">▼</button>
+  <h3>自動判定（表示）</h3>
+  <label><input type="checkbox" id="f_step" checked> 段差</label><br>
+  <label><input type="checkbox" id="f_curve" checked> カーブ</label><br>
+  <label><input type="checkbox" id="f_hill" checked> 坂</label><br>
+  <label><input type="checkbox" id="f_flat" checked> 平地</label>
+
+  <hr>
+
+  <h3>凡例（autoLabel）</h3>
+  <div class="legend">
+    <div><span class="box" style="background:red"></span>段差</div>
+    <div><span class="box" style="background:blue"></span>カーブ</div>
+    <div><span class="box" style="background:orange"></span>坂</div>
+    <div><span class="box" style="background:green"></span>平地</div>
   </div>
-
-  <div class="panel-body" id="panelBody">
-    <b>セッション</b>
-    <select id="sessionSelect"></select>
-
-    <hr>
-
-    <b>diff</b><br>
-    <label><input type="checkbox" id="show45" checked>45+</label><br>
-    <label><input type="checkbox" id="show50" checked>50+</label><br>
-    <label><input type="checkbox" id="show55" checked>55+</label><br>
-    <label><input type="checkbox" id="show60" checked>60+</label>
-
-    <hr>
-
-    <b>Z軸</b><br>
-    <label><input type="checkbox" id="z10" checked>10–15</label><br>
-    <label><input type="checkbox" id="z15" checked>15–20</label><br>
-    <label><input type="checkbox" id="z20" checked>20–25</label><br>
-    <label><input type="checkbox" id="z25" checked>25+</label>
-  </div>
-  <div class="legend"> 
-    <div>
-      <span class="box" style="background:blue"></span>45+</div> 
-      <div><span class="box" style="background:red"></span>50+</div> 
-      <div><span class="box" style="background:rgb(31,180,31)"></span>55+</div> 
-      <div><span class="box" style="background:rgb(175,30,175)"></span>60+</div> 
-    </div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-import { getFirestore, collection, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import {
+  getFirestore,
+  collection,
+  getDocs,
+  addDoc
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-/* Firebase */
+/* ===== Firebase ===== */
 const app = initializeApp({
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
-/* Map */
+/* ===== Map ===== */
 const map = L.map("map");
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
+  .addTo(map);
 
-/* Utils */
-function distance(a,b,c,d){
-  const R=6371000;
-  const dLat=(c-a)*Math.PI/180;
-  const dLng=(d-b)*Math.PI/180;
-  return 2*R*Math.asin(Math.sqrt(
-    Math.sin(dLat/2)**2 +
-    Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLng/2)**2
-  ));
+let markers = [];
+
+/* ===== Utils ===== */
+function colorByLabel(l) {
+  if (l === "step") return "red";
+  if (l === "curve") return "blue";
+  if (l === "hill") return "orange";
+  if (l === "flat") return "green";
+  return "#999";
 }
 
-function markerColor(d){
-  if(d>=60) return "rgb(175,30,175)";
-  if(d>=55) return "rgb(31,180,31)";
-  if(d>=50) return "red";
-  return "blue";
+/* ===== Load ===== */
+async function loadEvents() {
+  const snap = await getDocs(collection(db, "raw_events"));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
-/* Load */
-async function load(){
-  const snap = await getDocs(collection(db,"raw_sessions"));
-  const arr=[];
-  snap.forEach(d=>{
-    d.data().logs?.forEach(l=>{
-      if(l.isEvent) arr.push({...l, sessionId:d.data().sessionId});
-    });
-  });
-  return arr;
-}
+/* ===== Draw ===== */
+function draw(events) {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
 
-let allData=[], markers=[];
-let selectedSession="all";
+  if (!events.length) return;
 
-/* UI */
-const ids = ["show45","show50","show55","show60","z10","z15","z20","z25"];
-ids.forEach(id=>document.getElementById(id).onchange=draw);
+  map.setView([events[0].lat, events[0].lng], 16);
 
-document.getElementById("toggleBtn").onclick=()=>{
-  document.getElementById("panelBody").classList.toggle("hidden");
-};
+  events.forEach(ev => {
+    const color = colorByLabel(ev.autoLabel);
 
-document.getElementById("sessionSelect").onchange=e=>{
-  selectedSession=e.target.value;
-  draw();
-};
-
-/* Draw */
-function draw(){
-  markers.forEach(m=>map.removeLayer(m));
-  markers=[];
-
-  let data = allData.filter(d =>
-    selectedSession==="all" || d.sessionId===selectedSession
-  );
-
-  data = data.filter(d=>{
-    const diffOK =
-      (d.diff>=60 && show60.checked) ||
-      (d.diff>=55 && show55.checked) ||
-      (d.diff>=50 && show50.checked) ||
-      (d.diff>=45 && show45.checked);
-
-    const z = Math.abs(d.z);
-    const zOK =
-      (z>=10 && z<15 && z10.checked) ||
-      (z>=15 && z<20 && z15.checked) ||
-      (z>=20 && z<25 && z20.checked) ||
-      (z>=25 && z25.checked);
-
-    return diffOK && zOK;
-  });
-
-  if(!data.length){
-    document.getElementById("noData").style.display="block";
-    return;
-  }
-  document.getElementById("noData").style.display="none";
-
-  const groups=[];
-  data.forEach(p=>{
-    let g=groups.find(g=>distance(p.lat,p.lng,g.lat,g.lng)<5);
-    if(!g){
-      groups.push({lat:p.lat,lng:p.lng,samples:[p]});
-    }else g.samples.push(p);
-  });
-
-  map.setView([groups[0].lat,groups[0].lng],16);
-
-  groups.forEach(g=>{
-    const avg=g.samples.reduce((a,b)=>a+b.diff,0)/g.samples.length;
-    const max=Math.max(...g.samples.map(s=>s.diff));
-
-    const m=L.circleMarker([g.lat,g.lng],{
-      radius:7,
-      color:markerColor(avg),
-      fillColor:markerColor(avg),
-      fillOpacity:0.7
+    const m = L.circleMarker([ev.lat, ev.lng], {
+      radius: 7,
+      color,
+      fillColor: color,
+      fillOpacity: 0.8
     }).addTo(map);
 
-    const avgX = g.samples.reduce((a,b)=>a+b.x,0)/g.samples.length;
-  const avgY = g.samples.reduce((a,b)=>a+b.y,0)/g.samples.length;
-  const avgZ = g.samples.reduce((a,b)=>a+b.z,0)/g.samples.length;
+    m.meta = { autoLabel: ev.autoLabel };
 
     m.bindPopup(`
-      <b>検出</b><br>
-      件数:${g.samples.length}<br>
-      avg:${avg.toFixed(2)}<br>
-      max:${max.toFixed(2)}<br><br>
-
-      <b>平均加速度</b><br>
-      X：${avgX.toFixed(2)}<br>
-      Y：${avgY.toFixed(2)}<br>
-      Z：${avgZ.toFixed(2)}<br><br>
-
-      <button class="label-btn step" onclick="saveLabel(${g.lat},${g.lng},'step')">段差</button>
-      <button class="label-btn curve" onclick="saveLabel(${g.lat},${g.lng},'curve')">カーブ</button>
-      <button class="label-btn flat" onclick="saveLabel(${g.lat},${g.lng},'flat')">平地</button>
+      <b>自動判定</b>: ${ev.autoLabel}<br>
+      diffMax: ${ev.features.diffMax}<br>
+      xyRatio: ${ev.features.xyRatio.toFixed(2)}<br>
+      zRatio: ${ev.features.zRatio.toFixed(2)}<br>
+      <hr>
+      <b>正解入力</b><br>
+      <button class="step" onclick="saveGT('${ev.id}','step')">段差</button>
+      <button class="curve" onclick="saveGT('${ev.id}','curve')">カーブ</button>
+      <button class="hill" onclick="saveGT('${ev.id}','hill')">坂</button>
+      <button class="flat" onclick="saveGT('${ev.id}','flat')">平地</button>
     `);
 
     markers.push(m);
   });
+
+  applyFilter();
 }
 
-/* Save */
-window.saveLabel = async (lat,lng,label)=>{
-  const samples = allData.filter(d=>distance(lat,lng,d.lat,d.lng)<5);
-  const avg = samples.reduce((a,b)=>a+b.diff,0)/samples.length;
+/* ===== Filter ===== */
+function applyFilter() {
+  const fs = {
+    step: document.getElementById("f_step").checked,
+    curve: document.getElementById("f_curve").checked,
+    hill: document.getElementById("f_hill").checked,
+    flat: document.getElementById("f_flat").checked
+  };
 
-  await addDoc(collection(db,"labels"),{
-    lat,lng,
-    avgDiff:avg,
-    maxDiff:Math.max(...samples.map(s=>s.diff)),
-    label_true:label,
-    type_detected:label,
-    samples:samples.map(s=>({
-      diff:s.diff,x:s.x,y:s.y,z:s.z
-    })),
-    sessionId:"all",
-    updatedAt:new Date().toISOString()
+  markers.forEach(m => {
+    if (fs[m.meta.autoLabel]) m.addTo(map);
+    else map.removeLayer(m);
   });
+}
 
-  alert("保存しました");
+["f_step","f_curve","f_hill","f_flat"].forEach(id =>
+  document.getElementById(id).onchange = applyFilter
+);
+
+/* ===== Save GT ===== */
+window.saveGT = async (eventId, gt) => {
+  await addDoc(collection(db, "event_labels"), {
+    eventId,
+    groundTruth: gt,
+    labeledAt: new Date().toISOString()
+  });
+  alert("正解ラベルを保存しました");
 };
 
-allData = await load();
+/* ===== Init ===== */
+const events = await loadEvents();
+draw(events);
 
-const sel=document.getElementById("sessionSelect");
-sel.innerHTML='<option value="all">すべて</option>';
-[...new Set(allData.map(d=>d.sessionId))].forEach(s=>{
-  const o=document.createElement("option");
-  o.value=s; o.textContent=s;
-  sel.appendChild(o);
-});
-
-draw();
 </script>
 </body>
 </html>
