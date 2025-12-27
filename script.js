@@ -133,10 +133,10 @@ function handleMotion(e){
         sample.type = "step";
         logUI("段差検出");
         createMarker(sample,"red");
-      } else {
-        sample.type = "curve";
-        logUI("カーブ検出");
-        createMarker(sample,"blue");
+      // } else {
+      //   sample.type = "curve";
+      //   logUI("カーブ検出");
+      //   createMarker(sample,"blue");
       }
       sample.isEvent = true;
       lastEventTime = now;
