@@ -2,28 +2,46 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>散布図切替（Plotly版）</title>
+<title>Evaluation / 判定可視化</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdn.plot.ly/plotly-2.25.2.min.js"></script>
+
 <style>
-body { font-family: sans-serif; margin:20px; text-align:center; }
-#scatterPlot { width:90%; max-width:1000px; height:600px; margin:20px auto; }
-button { margin:5px; padding:6px 12px; border-radius:4px; cursor:pointer; }
+body {
+  font-family: sans-serif;
+  margin: 20px;
+  text-align: center;
+}
+
+#plot {
+  width: 95%;
+  max-width: 1100px;
+  height: 650px;
+  margin: 20px auto;
+}
+
+button {
+  margin: 4px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
 </style>
 </head>
+
 <body>
 
-<h1>判定式可視化（diff × xyMean）</h1>
-<div id="scatterPlot"></div>
+<h1>自動判定・GT 評価 / 判定式可視化</h1>
 
 <div>
-  <button id="btnDiffXY">diff × xyMean</button>
-  <button id="btnDiffHist">diff 分布</button>
+  <button id="btnScatter">判定式（diff × xyMean）</button>
+  <button id="btnHist">diff 分布</button>
+  <button id="btnConfusion">自動判定 vs GT</button>
+  <button id="btnDecision">判定式決定説明</button>
+  <button id="btnMetrics">評価指標（表）</button>
 </div>
 
-<div style="margin-top:15px;">
-  <button id="downloadBtn">CSVダウンロード</button>
-</div>
+<div id="plot"></div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
@@ -36,151 +54,176 @@ const app = initializeApp({
 });
 const db = getFirestore(app);
 
-/* ラベル定義 */
-const KEYS = ["step","curve","flat","hill"];
-const LABEL = { step:"段差", curve:"カーブ", flat:"平地", hill:"坂" };
-const COLOR = { step:"red", curve:"blue", flat:"green", hill:"orange" };
+/* 定義 */
+const KEYS = ["step","curve","hill","flat"];
+const LABEL = { step:"段差", curve:"カーブ", hill:"坂", flat:"平地" };
+const COLOR = { step:"red", curve:"blue", hill:"orange", flat:"green" };
 
 /* データ取得 */
-const snap = await getDocs(collection(db,"labels"));
-let rows = [];
-snap.docs.forEach(d => {
+const rawSnap = await getDocs(collection(db,"raw_events"));
+const gtSnap  = await getDocs(collection(db,"event_labels"));
+
+const rawEvents = rawSnap.docs.map(d => ({ id:d.id, ...d.data() }));
+const gtMap = {};
+gtSnap.docs.forEach(d => {
   const r = d.data();
-  if(r.samples?.length){
-    r.samples.forEach(s=>{
-      rows.push({
-        ...r,
-        ...s,
-        xyMean:(Math.abs(s.x)+Math.abs(s.y))/2
-      });
-    });
-  } else {
-    rows.push({
-      ...r,
-      xyMean:(Math.abs(r.x)+Math.abs(r.y))/2
-    });
-  }
+  gtMap[r.eventId] = r.groundTruth;
 });
 
-if(rows.length===0) alert("labels にデータがありません");
+/* 整形 */
+const rows = rawEvents
+  .filter(ev => ev.features)
+  .map(ev => ({
+    auto: ev.autoLabel,
+    gt: gtMap[ev.id] ?? null,
+    diff: ev.features.diffMax,
+    xyRatio: ev.features.xyRatio,
+    xyMean: ev.features.xyRatio
+  }))
+  .filter(r => r.gt && r.auto);
 
-/* =========================
-   diff × xyMean 散布図
-========================= */
-function drawDiffXY(){
+/* ---------- 既存グラフ ---------- */
+
+function drawScatter(){
   const data = KEYS.map(k => {
-    const filtered = rows.filter(r =>
-      r.label_true === k &&
-      typeof r.diff === "number" &&
-      typeof r.xyMean === "number"
-    );
-
+    const f = rows.filter(r => r.gt === k);
     return {
-      x: filtered.map(r => r.diff),
-      y: filtered.map(r => r.xyMean),
+      x: f.map(r => r.diff),
+      y: f.map(r => r.xyMean),
       mode: "markers",
       type: "scattergl",
       name: LABEL[k],
-      marker: {
-        color: COLOR[k],
-        size: 6,
-        opacity: 0.7
-      }
+      marker: { color: COLOR[k], size: 6, opacity: 0.7 }
     };
   });
 
-  const layout = {
-    xaxis: { title: "diff" },
-    yaxis: { title: "|x + y| / 2 (xyMean)" },
-    legend: { orientation:"h" },
-    margin:{ t:40, l:60, r:20, b:60 },
-    hovermode:"closest"
-  };
-
-  Plotly.newPlot("scatterPlot", data, layout, {responsive:true});
+  Plotly.newPlot("plot", data, {
+    xaxis:{ title:"diffMax" },
+    yaxis:{ title:"xyRatio" },
+    margin:{t:40}
+  });
 }
 
-/* =========================
-   diff 分布ヒストグラム
-========================= */
-function drawDiffHist(){
+function drawHist(){
   const data = KEYS.map(k => {
-    const filtered = rows.filter(r =>
-      r.label_true === k &&
-      typeof r.diff === "number"
-    );
-
+    const f = rows.filter(r => r.gt === k);
     return {
-      x: filtered.map(r => r.diff),
+      x: f.map(r => r.diff),
       type: "histogram",
       name: LABEL[k],
       opacity: 0.6,
-      marker: { color: COLOR[k] },
-      autobinx: true
+      marker:{ color: COLOR[k] }
     };
   });
 
-  const layout = {
-    xaxis: { title: "diff" },
-    yaxis: { title: "count" },
-    barmode: "overlay",
-    legend: { orientation:"h" },
-    margin:{ t:40, l:60, r:20, b:60 }
-  };
+  Plotly.newPlot("plot", data, {
+    barmode:"overlay",
+    xaxis:{ title:"diffMax" },
+    yaxis:{ title:"count" },
+    margin:{t:40}
+  });
+}
 
-  Plotly.newPlot("scatterPlot", data, layout, {responsive:true});
+function drawConfusion(){
+  const matrix = {};
+  KEYS.forEach(a=>{
+    matrix[a]={};
+    KEYS.forEach(b=>matrix[a][b]=0);
+  });
+
+  rows.forEach(r=>{
+    matrix[r.gt][r.auto]++;
+  });
+
+  const z = KEYS.map(gt => KEYS.map(auto => matrix[gt][auto]));
+
+  Plotly.newPlot("plot", [{
+    z,
+    x: KEYS.map(k=>LABEL[k]),
+    y: KEYS.map(k=>LABEL[k]),
+    type:"heatmap",
+    colorscale:"Blues"
+  }],{
+    xaxis:{ title:"自動判定" },
+    yaxis:{ title:"正解(GT)" },
+    margin:{t:40}
+  });
+}
+
+function drawDecision(){
+  const data = KEYS.map(k => {
+    const f = rows.filter(r => r.gt === k);
+    return {
+      x: f.map(r => r.xyRatio),
+      y: f.map(r => r.diff),
+      mode:"markers",
+      type:"scattergl",
+      name: LABEL[k],
+      marker:{ color: COLOR[k], size:6, opacity:0.7 }
+    };
+  });
+
+  Plotly.newPlot("plot", data, {
+    xaxis:{ title:"xyRatio" },
+    yaxis:{ title:"diffMax" },
+    margin:{t:40}
+  });
+}
+
+/* ---------- NEW：評価指標（表） ---------- */
+function drawMetrics(){
+  const total = rows.length;
+  const accuracy = rows.filter(r => r.gt === r.auto).length / total;
+
+  const table = KEYS.map(k => {
+    const TP = rows.filter(r => r.gt===k && r.auto===k).length;
+    const FP = rows.filter(r => r.gt!==k && r.auto===k).length;
+    const FN = rows.filter(r => r.gt===k && r.auto!==k).length;
+
+    const precision = TP / (TP + FP || 1);
+    const recall = TP / (TP + FN || 1);
+    const f1 = 2 * precision * recall / (precision + recall || 1);
+
+    return {
+      label: LABEL[k],
+      p: precision,
+      r: recall,
+      f: f1
+    };
+  });
+
+  Plotly.newPlot("plot", [{
+    type:"table",
+    header:{
+      values:["クラス","正解率","適合率","再現率","F1"],
+      align:"center",
+      fill:{color:"#eee"}
+    },
+    cells:{
+      values:[
+        table.map(r=>r.label),
+        table.map(_=>accuracy.toFixed(2)),
+        table.map(r=>r.p.toFixed(2)),
+        table.map(r=>r.r.toFixed(2)),
+        table.map(r=>r.f.toFixed(2))
+      ],
+      align:"center"
+    }
+  }],{
+    margin:{t:20}
+  });
 }
 
 /* 初期表示 */
-drawDiffXY();
+drawScatter();
 
 /* ボタン */
-document.getElementById("btnDiffXY").onclick = drawDiffXY;
-document.getElementById("btnDiffHist").onclick = drawDiffHist;
+btnScatter.onclick = drawScatter;
+btnHist.onclick = drawHist;
+btnConfusion.onclick = drawConfusion;
+btnDecision.onclick = drawDecision;
+btnMetrics.onclick = drawMetrics;
 
-/* ===== CSVダウンロード ===== */
-document.getElementById("downloadBtn").onclick = () => {
-  if(rows.length === 0) return alert("データがありません");
-
-  const header = ["label","event_index","sample_index","x","y","z","diff"];
-  const lines = [header.join(",")];
-
-  const events = {};
-  rows.forEach(r => {
-    const docId = r.docId || r.id || r.label_true + "_" + r.updatedAt;
-    if(!events[docId]){
-      events[docId] = {
-        label: r.label_true,
-        samples: r.samples?.length
-          ? r.samples
-          : [{x:r.x,y:r.y,z:r.z,diff:r.diff}]
-      };
-    }
-  });
-
-  Object.entries(events).forEach(([_, {label, samples}], event_index) => {
-    samples.forEach((s, sample_index) => {
-      lines.push([
-        label,
-        event_index,
-        sample_index,
-        s.x.toFixed(2),
-        s.y.toFixed(2),
-        s.z.toFixed(2),
-        s.diff.toFixed(2)
-      ].join(","));
-    });
-  });
-
-  const blob = new Blob([lines.join("\n")], {type:"text/csv"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "scatter_data.csv";
-  a.click();
-  URL.revokeObjectURL(url);
-};
 </script>
-
 </body>
 </html>

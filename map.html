@@ -4,75 +4,90 @@
 <meta charset="UTF-8">
 <title>Barrier Map - Evaluation</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-
 <style>
 html, body { height:100%; margin:0; }
 #map { width:100%; height:100%; }
 
 .panel {
-  position:absolute;
-  top:10px; left:10px;
-  background:white;
-  padding:10px;
-  border-radius:8px;
-  box-shadow:0 0 6px rgba(0,0,0,.25);
-  z-index:1000;
-  width:260px;
-  font-size:13px;
+position:absolute;
+top:10px; left:10px;
+background:white;
+padding:10px;
+border-radius:8px;
+box-shadow:0 0 6px rgba(0,0,0,.25);
+z-index:1000;
+width:260px;
+font-size:13px;
 }
 
 .panel h3 {
-  margin:0 0 6px;
-  font-size:14px;
+margin:0 0 6px;
+font-size:14px;
 }
 
 .legend div {
-  display:flex;
-  align-items:center;
-  margin-bottom:4px;
+display:flex;
+align-items:center;
+margin-bottom:4px;
 }
+
 .box {
-  width:12px;
-  height:12px;
-  border-radius:50%;
-  margin-right:6px;
+width:12px;
+height:12px;
+border-radius:50%;
+margin-right:6px;
 }
 
 button {
-  width:100%;
-  margin-top:4px;
-  padding:4px;
+width:100%;
+margin-top:4px;
+padding:4px;
+cursor:pointer;
 }
 
 .step { background:#f44336; color:white; }
 .curve { background:#2196f3; color:white; }
 .hill { background:orange; color:white; }
 .flat { background:#4caf50; color:white; }
+
+.mode {
+margin-bottom:6px;
+}
 </style>
 </head>
 
 <body>
-
 <div id="map"></div>
 
 <div class="panel">
-  <h3>自動判定（表示）</h3>
-  <label><input type="checkbox" id="f_step" checked> 段差</label><br>
-  <label><input type="checkbox" id="f_curve" checked> カーブ</label><br>
-  <label><input type="checkbox" id="f_hill" checked> 坂</label><br>
-  <label><input type="checkbox" id="f_flat" checked> 平地</label>
+<h3>表示モード</h3>
+<div class="mode">
+<label><input type="radio" name="viewMode" value="auto" checked> 自動判定</label><br>
+<label><input type="radio" name="viewMode" value="gt"> 正解（GT）</label>
+</div>
 
-  <hr>
+<hr>
 
-  <h3>凡例（autoLabel）</h3>
-  <div class="legend">
-    <div><span class="box" style="background:red"></span>段差</div>
-    <div><span class="box" style="background:blue"></span>カーブ</div>
-    <div><span class="box" style="background:orange"></span>坂</div>
-    <div><span class="box" style="background:green"></span>平地</div>
-  </div>
+<h3>自動判定（表示）</h3>
+<label><input type="checkbox" id="f_step" checked> 段差</label><br>
+<label><input type="checkbox" id="f_curve" checked> カーブ</label><br>
+<label><input type="checkbox" id="f_hill" checked> 坂</label><br>
+<label><input type="checkbox" id="f_flat" checked> 平地</label>
+
+<hr>
+
+<button id="bulkGT">未入力を自動判定で一括GT保存</button>
+
+<hr>
+
+<h3>凡例</h3>
+<div class="legend">
+<div><span class="box" style="background:red"></span>段差</div>
+<div><span class="box" style="background:blue"></span>カーブ</div>
+<div><span class="box" style="background:orange"></span>坂</div>
+<div><span class="box" style="background:green"></span>平地</div>
+</div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -80,113 +95,190 @@ button {
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import {
-  getFirestore,
-  collection,
-  getDocs,
-  addDoc
+getFirestore,
+collection,
+getDocs,
+addDoc,
+query,
+where
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
 /* ===== Firebase ===== */
 const app = initializeApp({
-  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
-  projectId: "bike-barrier-detector-1e128"
+apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
 /* ===== Map ===== */
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
-  .addTo(map);
+.addTo(map);
 
+/* ===== State ===== */
 let markers = [];
+let allEvents = [];
+let gtMap = {}; // eventId -> groundTruth
 
 /* ===== Utils ===== */
 function colorByLabel(l) {
-  if (l === "step") return "red";
-  if (l === "curve") return "blue";
-  if (l === "hill") return "orange";
-  if (l === "flat") return "green";
-  return "#999";
+if (l === "step") return "red";
+if (l === "curve") return "blue";
+if (l === "hill") return "orange";
+if (l === "flat") return "green";
+return "#999";
 }
 
-/* ===== Load ===== */
+/* ===== Load Events ===== */
 async function loadEvents() {
-  const snap = await getDocs(collection(db, "raw_events"));
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+const snap = await getDocs(collection(db, "raw_events"));
+return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+/* ===== Load GT ===== */
+async function loadGT() {
+const snap = await getDocs(collection(db, "event_labels"));
+gtMap = {};
+snap.docs.forEach(d => {
+const data = d.data();
+gtMap[data.eventId] = data.groundTruth;
+});
+}
+
+/* ===== Initial View Priority ===== */
+async function setInitialView(events) {
+if (navigator.geolocation) {
+navigator.geolocation.getCurrentPosition(
+pos => {
+map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+},
+() => fallback()
+);
+} else fallback();
+
+function fallback() {
+if (events.length) {
+const center = events.reduce((a,b) => {
+a.lat += b.lat;
+a.lng += b.lng;
+return a;
+},{lat:0,lng:0});
+map.setView([center.lat/events.length, center.lng/events.length], 15);
+} else {
+map.setView([35.681236, 139.767125], 14); // 東京駅
+}
+}
 }
 
 /* ===== Draw ===== */
-function draw(events) {
-  markers.forEach(m => map.removeLayer(m));
-  markers = [];
+function draw() {
+markers.forEach(m => map.removeLayer(m));
+markers = [];
 
-  if (!events.length) return;
+const mode = document.querySelector("input[name=viewMode]:checked").value;
 
-  map.setView([events[0].lat, events[0].lng], 16);
+allEvents.forEach(ev => {
+const label = (mode === "gt" && gtMap[ev.id]) ? gtMap[ev.id] : ev.autoLabel;
+const color = colorByLabel(label);
 
-  events.forEach(ev => {
-    const color = colorByLabel(ev.autoLabel);
+const m = L.circleMarker([ev.lat, ev.lng], {
+radius: 7,
+color,
+fillColor: color,
+fillOpacity: 0.8
+}).addTo(map);
 
-    const m = L.circleMarker([ev.lat, ev.lng], {
-      radius: 7,
-      color,
-      fillColor: color,
-      fillOpacity: 0.8
-    }).addTo(map);
+m.meta = {
+autoLabel: ev.autoLabel,
+gtLabel: gtMap[ev.id] || null
+};
 
-    m.meta = { autoLabel: ev.autoLabel };
+m.bindPopup(`
+<b>自動判定</b>: ${ev.autoLabel}<br>
+<b>正解(GT)</b>: ${gtMap[ev.id] ?? "未入力"}<br>
+<hr>
+diffMax: ${ev.features.diffMax}<br>
+xyRatio: ${ev.features.xyRatio.toFixed(2)}<br>
+zRatio: ${ev.features.zRatio.toFixed(2)}<br>
+<hr>
+<b>正解入力</b><br>
+<button class="step" onclick="saveGT('${ev.id}','step')">段差</button>
+<button class="curve" onclick="saveGT('${ev.id}','curve')">カーブ</button>
+<button class="hill" onclick="saveGT('${ev.id}','hill')">坂</button>
+<button class="flat" onclick="saveGT('${ev.id}','flat')">平地</button>
+`);
 
-    m.bindPopup(`
-      <b>自動判定</b>: ${ev.autoLabel}<br>
-      diffMax: ${ev.features.diffMax}<br>
-      xyRatio: ${ev.features.xyRatio.toFixed(2)}<br>
-      zRatio: ${ev.features.zRatio.toFixed(2)}<br>
-      <hr>
-      <b>正解入力</b><br>
-      <button class="step" onclick="saveGT('${ev.id}','step')">段差</button>
-      <button class="curve" onclick="saveGT('${ev.id}','curve')">カーブ</button>
-      <button class="hill" onclick="saveGT('${ev.id}','hill')">坂</button>
-      <button class="flat" onclick="saveGT('${ev.id}','flat')">平地</button>
-    `);
+markers.push(m);
+});
 
-    markers.push(m);
-  });
-
-  applyFilter();
+applyFilter();
 }
 
 /* ===== Filter ===== */
 function applyFilter() {
-  const fs = {
-    step: document.getElementById("f_step").checked,
-    curve: document.getElementById("f_curve").checked,
-    hill: document.getElementById("f_hill").checked,
-    flat: document.getElementById("f_flat").checked
-  };
+const fs = {
+step: document.getElementById("f_step").checked,
+curve: document.getElementById("f_curve").checked,
+hill: document.getElementById("f_hill").checked,
+flat: document.getElementById("f_flat").checked
+};
 
-  markers.forEach(m => {
-    if (fs[m.meta.autoLabel]) m.addTo(map);
-    else map.removeLayer(m);
-  });
+markers.forEach(m => {
+const label = document.querySelector("input[name=viewMode]:checked").value === "gt"
+? m.meta.gtLabel
+: m.meta.autoLabel;
+
+if (!label || fs[label]) m.addTo(map);
+else map.removeLayer(m);
+});
 }
-
-["f_step","f_curve","f_hill","f_flat"].forEach(id =>
-  document.getElementById(id).onchange = applyFilter
-);
 
 /* ===== Save GT ===== */
 window.saveGT = async (eventId, gt) => {
-  await addDoc(collection(db, "event_labels"), {
-    eventId,
-    groundTruth: gt,
-    labeledAt: new Date().toISOString()
-  });
-  alert("正解ラベルを保存しました");
+await addDoc(collection(db, "event_labels"), {
+eventId,
+groundTruth: gt,
+labeledAt: new Date().toISOString()
+});
+await loadGT();
+draw();
+};
+
+/* ===== Bulk GT ===== */
+document.getElementById("bulkGT").onclick = async () => {
+const unlabeled = allEvents.filter(ev => !gtMap[ev.id]);
+if (!unlabeled.length) {
+alert("未入力データはありません");
+return;
+}
+if (!confirm(`${unlabeled.length}件を自動判定でGT登録しますか？`)) return;
+
+for (const ev of unlabeled) {
+await addDoc(collection(db, "event_labels"), {
+eventId: ev.id,
+groundTruth: ev.autoLabel,
+labeledAt: new Date().toISOString(),
+bulk: true
+});
+}
+await loadGT();
+draw();
+alert("一括GT保存完了");
 };
 
 /* ===== Init ===== */
-const events = await loadEvents();
-draw(events);
+["f_step","f_curve","f_hill","f_flat"].forEach(id =>
+document.getElementById(id).onchange = applyFilter
+);
+
+document.querySelectorAll("input[name=viewMode]").forEach(r =>
+r.onchange = draw
+);
+
+allEvents = await loadEvents();
+await loadGT();
+await setInitialView(allEvents);
+draw();
 
 </script>
 </body>
