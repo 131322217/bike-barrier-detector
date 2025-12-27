@@ -100,12 +100,26 @@ let allEvents = [];
 let gtMap = {}; // eventId -> groundTruth
 
 /* ===== Utils ===== */
-function colorByLabel(l) {
-  if (l === "step") return "red";
-  if (l === "curve") return "blue";
-  if (l === "hill") return "orange";
-  if (l === "flat") return "green";
-  return "#999";
+// 色を返す関数を変更：未入力なら薄くする
+function colorByLabel(label, unlabeled=false) {
+  const colors = {
+    step: "red",
+    curve: "blue",
+    hill: "orange",
+    flat: "green"
+  };
+  const baseColor = colors[label] || "#999";
+
+  if (unlabeled) {
+    // 半透明で薄く表示
+    if (baseColor === "red") return "rgba(255,0,0,0.4)";
+    if (baseColor === "blue") return "rgba(0,0,255,0.4)";
+    if (baseColor === "orange") return "rgba(255,165,0,0.4)";
+    if (baseColor === "green") return "rgba(0,128,0,0.4)";
+    return "rgba(153,153,153,0.4)";
+  }
+
+  return baseColor;
 }
 
 /* ===== Load Events ===== */
@@ -158,7 +172,8 @@ function draw() {
       label = ev.autoLabel;
     }
 
-    const color = label ? colorByLabel(label) : "#999";
+    const unlabeled = !gtMap[ev.id]; // GT未入力かどうか
+    const color = colorByLabel(label, unlabeled); // ←ここで薄くする
 
     const m = L.circleMarker([ev.lat, ev.lng], {
       radius: 7,
