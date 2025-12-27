@@ -50,6 +50,24 @@ button { width:100%; margin-top:4px; }
   font-weight:bold;
   display:none;
 }
+.legend {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.legend div {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.box {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
 </style>
 </head>
 <body>
@@ -83,6 +101,13 @@ button { width:100%; margin-top:4px; }
     <label><input type="checkbox" id="z20" checked>20–25</label><br>
     <label><input type="checkbox" id="z25" checked>25+</label>
   </div>
+  <div class="legend"> 
+    <div>
+      <span class="box" style="background:blue"></span>45+</div> 
+      <div><span class="box" style="background:red"></span>50+</div> 
+      <div><span class="box" style="background:rgb(31,180,31)"></span>55+</div> 
+      <div><span class="box" style="background:rgb(175,30,175)"></span>60+</div> 
+    </div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -209,7 +234,7 @@ function draw(){
       件数:${g.samples.length}<br>
       avg:${avg.toFixed(2)}<br>
       max:${max.toFixed(2)}<br><br>
-      
+
       <b>平均加速度</b><br>
       X：${avgX.toFixed(2)}<br>
       Y：${avgY.toFixed(2)}<br>
