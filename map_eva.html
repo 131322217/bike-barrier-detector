@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Barrier Map - Evaluation</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<style>
+html, body { height:100%; margin:0; }
+#map { width:100%; height:100%; }
+
+.panel {
+position:absolute;
+top:10px; left:10px;
+background:white;
+padding:10px;
+border-radius:8px;
+box-shadow:0 0 6px rgba(0,0,0,.25);
+z-index:1000;
+width:200px;
+font-size:13px;
+}
+
+.panel h3 {
+margin:0 0 6px;
+font-size:14px;
+}
+
+.legend div {
+display:flex;
+align-items:center;
+margin-bottom:4px;
+}
+
+.box {
+width:12px;
+height:12px;
+border-radius:50%;
+margin-right:6px;
+}
+</style>
+</head>
+
+<body>
+<div id="map"></div>
+
+<div class="panel">
+<h3>凡例</h3>
+<div class="legend">
+  <div><span class="box" style="background:red"></span>段差一致</div>
+  <div><span class="box" style="background:pink"></span>見逃し</div>
+  <div><span class="box" style="background:yellowgreen"></span>誤検出</div>
+  <div><span class="box" style="background:gray"></span>段差以外</div>
+</div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+/* ===== Firebase ===== */
+const app = initializeApp({
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  projectId: "bike-barrier-detector-1e128"
+});
+const db = getFirestore(app);
+
+/* ===== Map ===== */
+const map = L.map("map");
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+/* ===== State ===== */
+let markers = [];
+let allEvents = [];
+let gtMap = {}; // eventId -> groundTruth
+
+/* ===== Load Events ===== */
+async function loadEvents() {
+  const snap = await getDocs(collection(db, "raw_events"));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+/* ===== Load GT ===== */
+async function loadGT() {
+  const snap = await getDocs(collection(db, "event_labels"));
+  gtMap = {};
+  snap.docs.forEach(d => {
+    const data = d.data();
+    gtMap[data.eventId] = data.groundTruth;
+  });
+}
+
+/* ===== Color function for evaluation ===== */
+function getColor(ev) {
+  const auto = ev.autoLabel;
+  const gt = gtMap[ev.id];
+
+  // 段差正解
+  if(gt === "step" && auto === "step") return "red";
+  // 見逃し
+  if(gt === "step" && auto !== "step") return "pink";
+  // 誤検出
+  if(gt !== "step" && auto === "step") return "yellowgreen";
+  // 段差以外
+  return "gray";
+}
+
+/* ===== Draw markers ===== */
+function draw() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  allEvents.forEach(ev => {
+    const color = getColor(ev);
+    const m = L.circleMarker([ev.lat, ev.lng], {
+      radius: 7,
+      color,
+      fillColor: color,
+      fillOpacity: 0.8
+    }).addTo(map);
+    markers.push(m);
+  });
+
+  if(allEvents.length) {
+    const center = allEvents.reduce((a,b) => { a.lat+=b.lat; a.lng+=b.lng; return a; }, {lat:0,lng:0});
+    map.setView([center.lat/allEvents.length, center.lng/allEvents.length], 15);
+  } else {
+    map.setView([35.681236, 139.767125], 14); // 東京駅
+  }
+}
+
+/* ===== Init ===== */
+allEvents = await loadEvents();
+await loadGT();
+draw();
+</script>
+</body>
+</html>
