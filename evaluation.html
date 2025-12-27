@@ -39,6 +39,9 @@ button {
   <button id="btnConfusion">自動判定 vs GT</button>
   <button id="btnDecision">判定式決定説明</button>
   <button id="btnMetrics">評価指標（表）</button>
+  <button id="btnDownloadCsv">CSVをダウンロード</button>
+  <button id="btnDownloadAll">イベント全波形データCSV</button>
+  <button id="btnScore">スコア可視化</button>
 </div>
 
 <div id="plot"></div>
@@ -131,9 +134,7 @@ function drawConfusion(){
     KEYS.forEach(b=>matrix[a][b]=0);
   });
 
-  rows.forEach(r=>{
-    matrix[r.gt][r.auto]++;
-  });
+  rows.forEach(r=>{ matrix[r.gt][r.auto]++; });
 
   const z = KEYS.map(gt => KEYS.map(auto => matrix[gt][auto]));
 
@@ -214,6 +215,129 @@ function drawMetrics(){
   });
 }
 
+/* ---------- NEW：CSVダウンロード ---------- */
+function downloadCsv(){
+  const headers = ["eventId","autoLabel","groundTruth","diffMax","xyRatio"];
+  const lines = [headers.join(",")];
+
+  rawEvents.forEach(ev => {
+    if(!ev.features) return;
+    const gt = gtMap[ev.id] ?? "";
+    const line = [
+      ev.id,
+      ev.autoLabel ?? "",
+      gt,
+      ev.features.diffMax ?? "",
+      ev.features.xyRatio ?? ""
+    ].join(",");
+    lines.push(line);
+  });
+
+  const csvContent = lines.join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "event_data.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* ---------- イベントサンプル全波形データダウンロード ---------- */
+function downloadAllSamples() {
+  // 各イベントごとに全サンプルを展開
+  let csv = "eventId,autoLabel,groundTruth,timestamp,x,y,z,diff,lat,lng\n";
+  rawEvents.forEach(ev => {
+    if (!ev.samples) return;
+    const gt = gtMap[ev.id] ?? "";
+    ev.samples.forEach(s => {
+      csv += [
+        ev.id, ev.autoLabel, gt, s.timestamp, s.x, s.y, s.z, s.diff, s.lat, s.lng
+      ].join(",") + "\n";
+    });
+  });
+
+  /* ---------- NEW：スコア化可視化 ---------- */
+function drawScore(){
+  // スコア化
+  const scoredRows = rows.map(r => {
+    const score = r.diff * 0.6 + r.zRatio * 30 + r.xyRatio * 20; // 仮の重み
+    return {...r, score};
+  });
+
+  // イベントタイプごとにプロット
+  const data = KEYS.map(k => {
+    const f = scoredRows.filter(r => r.gt === k);
+    return {
+      x: f.map(r => r.score),
+      y: f.map(r => r.diff),
+      mode: "markers",
+      type: "scattergl",
+      name: LABEL[k],
+      marker: { color: COLOR[k], size: 6, opacity: 0.7 }
+    };
+  });
+
+  // 閾値ライン例（score=仮の境界）
+  const shapes = [
+    { type: 'line', x0: 50, x1: 50, y0: 0, y1: 100, line: {color: 'black', dash:'dot'} }, // score閾値例
+    { type: 'line', x0: 0, x1: 100, y0: 50, y1: 50, line: {color: 'red', dash:'dash'} }   // diffMax閾値例
+  ];
+
+  Plotly.newPlot("plot", data, {
+    xaxis: { title: "Score (diff*0.6 + zRatio*30 + xyRatio*20)" },
+    yaxis: { title: "diffMax" },
+    margin: { t: 40 },
+    shapes: shapes
+  });
+}
+
+
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "all_event_samples.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+/* ---------- NEW：スコア化可視化 ---------- */
+function drawScore(){
+  // スコア化
+  const scoredRows = rows.map(r => {
+    const score = r.diff * 0.6 + r.zRatio * 30 + r.xyRatio * 20; // 仮の重み
+    return {...r, score};
+  });
+
+  // イベントタイプごとにプロット
+  const data = KEYS.map(k => {
+    const f = scoredRows.filter(r => r.gt === k);
+    return {
+      x: f.map(r => r.score),
+      y: f.map(r => r.diff),
+      mode: "markers",
+      type: "scattergl",
+      name: LABEL[k],
+      marker: { color: COLOR[k], size: 6, opacity: 0.7 }
+    };
+  });
+
+  // 閾値ライン例（score=仮の境界）
+  const shapes = [
+    { type: 'line', x0: 50, x1: 50, y0: 0, y1: 100, line: {color: 'black', dash:'dot'} }, // score閾値例
+    { type: 'line', x0: 0, x1: 100, y0: 50, y1: 50, line: {color: 'red', dash:'dash'} }   // diffMax閾値例
+  ];
+
+  Plotly.newPlot("plot", data, {
+    xaxis: { title: "Score (diff*0.6 + zRatio*30 + xyRatio*20)" },
+    yaxis: { title: "diffMax" },
+    margin: { t: 40 },
+    shapes: shapes
+  });
+}
+
 /* 初期表示 */
 drawScatter();
 
@@ -223,7 +347,9 @@ btnHist.onclick = drawHist;
 btnConfusion.onclick = drawConfusion;
 btnDecision.onclick = drawDecision;
 btnMetrics.onclick = drawMetrics;
-
+btnDownloadCsv.onclick = downloadCsv;
+btnDownloadAll.onclick = downloadAllSamples;
+btnScore.onclick = drawScore;
 </script>
 </body>
 </html>
