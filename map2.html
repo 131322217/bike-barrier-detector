@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Barrier Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<style>
+html,body{height:100%;margin:0;}
+#map{height:100%;}
+
+.panel{
+  position:absolute;top:10px;left:10px;
+  background:#fff;padding:10px;
+  border-radius:8px;
+  box-shadow:0 0 6px rgba(0,0,0,.3);
+  z-index:1000;width:240px;font-size:13px;
+}
+.panel h3{margin:6px 0;font-size:14px;}
+.legend div{display:flex;align-items:center;margin-bottom:4px;}
+.box{width:12px;height:12px;border-radius:50%;margin-right:6px;}
+
+table{width:100%;border-collapse:collapse;font-size:12px;}
+th,td{border:1px solid #ccc;padding:2px;text-align:center;}
+</style>
+</head>
+
+<body>
+<div id="map"></div>
+
+<div class="panel">
+  <h3>段差割合</h3>
+  <label><input type="radio" name="stepRatio" value="0.6" checked>60%</label>
+  <label><input type="radio" name="stepRatio" value="0.7">70%</label>
+  <label><input type="radio" name="stepRatio" value="0.8">80%</label>
+
+  <h3>表示</h3>
+  <label><input type="checkbox" id="showCandidate" checked>段差候補</label>
+
+  <h3>凡例</h3>
+  <div class="legend">
+    <div><span class="box" style="background:red"></span>段差</div>
+    <div><span class="box" style="background:purple"></span>段差候補</div>
+    <div><span class="box" style="background:blue"></span>カーブ</div>
+    <div><span class="box" style="background:orange"></span>坂</div>
+    <div><span class="box" style="background:green"></span>平地</div>
+  </div>
+
+  <h3>件数</h3>
+  <table>
+    <thead>
+      <tr><th>種別</th><th>件数</th></tr>
+    </thead>
+    <tbody id="countTable"></tbody>
+  </table>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+/* Firebase */
+const app = initializeApp({
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  projectId: "bike-barrier-detector-1e128"
+});
+const db = getFirestore(app);
+
+/* Map */
+const map = L.map("map").setView([35.681236,139.767125],14);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+let allEvents=[];
+let markers=[];
+let stepRatio=0.6;
+const GROUP_RADIUS=10; // meter
+
+/* Utils */
+function dist(a,b){
+  return map.distance([a.lat,a.lng],[b.lat,b.lng]);
+}
+function color(label){
+  return {step:"red",step_candidate:"purple",curve:"blue",hill:"orange",flat:"green"}[label];
+}
+
+/* Load */
+async function load(){
+  const snap=await getDocs(collection(db,"raw_events"));
+  allEvents=snap.docs.map(d=>d.data());
+  draw();
+}
+
+/* 距離ベースグルーピング */
+function groupByDistance(events){
+  const groups=[];
+  events.forEach(ev=>{
+    let added=false;
+    for(const g of groups){
+      if(dist(ev,g[0])<=GROUP_RADIUS){
+        g.push(ev);added=true;break;
+      }
+    }
+    if(!added) groups.push([ev]);
+  });
+  return groups;
+}
+
+/* グループ判定 */
+function decide(group){
+  const cnt={step:0,curve:0,hill:0,flat:0};
+  group.forEach(e=>cnt[e.autoLabel]++);
+  if(group.length===1 && cnt.step===1){
+    return {label:"step_candidate",ratio:1};
+  }
+  const ratio=cnt.step/group.length;
+  if(ratio>=stepRatio){
+    return {label:"step",ratio};
+  }
+  return {label:Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0][0],ratio};
+}
+
+/* Draw */
+function draw(){
+  markers.forEach(m=>map.removeLayer(m));
+  markers=[];
+
+  const counts={step:0,step_candidate:0,curve:0,hill:0,flat:0};
+
+  const groups=groupByDistance(allEvents);
+  groups.forEach(g=>{
+    const {label,ratio}=decide(g);
+    counts[label]++;
+
+    if(label==="step_candidate" && !showCandidate.checked) return;
+
+    const ev=g[0];
+    const m=L.circleMarker([ev.lat,ev.lng],{
+      radius:7,color:color(label),fillColor:color(label),fillOpacity:0.8
+    }).addTo(map);
+    m.bindPopup(`
+      <b>${label}</b><br>
+      段差割合:${(ratio*100).toFixed(0)}%<br>
+      グループ数:${g.length}
+    `);
+    markers.push(m);
+  });
+
+  updateTable(counts);
+}
+
+/* 件数表 */
+function updateTable(c){
+  const tbody=document.getElementById("countTable");
+  tbody.innerHTML="";
+  Object.keys(c).forEach(k=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${k}</td><td>${c[k]}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+/* UI */
+document.querySelectorAll("input[name=stepRatio]").forEach(r=>{
+  r.onchange=()=>{stepRatio=parseFloat(r.value);draw();}
+});
+showCandidate.onchange=draw;
+
+/* Init */
+load();
+</script>
+</body>
+</html>
