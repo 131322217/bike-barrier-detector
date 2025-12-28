@@ -96,6 +96,7 @@ button { width:100%; margin-top:4px; padding:4px; cursor:pointer; }
       <label><input type="radio" name="grouping" value="0.05"> 厳しめ ±0.05</label>
       <label><input type="radio" name="grouping" value="0.1"> 中間 ±0.1</label>
       <label><input type="radio" name="grouping" value="dist"> 距離（5ｍ）のみ</label>
+      <label><input type="radio" name="grouping" value="smart"> おすすめ（距離クラスタ）</label>
     </div>
   </div>
 
@@ -233,6 +234,56 @@ function groupEvents(events, tolerance){
   return grouped;
 }
 
+function groupEventsSmart(events, radius = 6, diffThreshold = 0.05) {
+  const clusters = [];
+  const used = new Set();
+
+  function dist(a, b) {
+    const dx = (a.lat - b.lat) * 111000;
+    const dy = (a.lng - b.lng) * 111000;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  for (let i = 0; i < events.length; i++) {
+    if (used.has(events[i].id)) continue;
+
+    const cluster = [events[i]];
+    used.add(events[i].id);
+
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+
+      for (const ev of events) {
+        if (used.has(ev.id)) continue;
+
+        const shouldJoin = cluster.some(c => {
+          const d = dist(c, ev);
+          const diffClose = Math.abs(c.diff - ev.diff) <= diffThreshold;
+
+          // 条件①：通常の距離判定
+          if (d <= radius) return true;
+
+          // 条件②：diffが近ければ距離を少し緩める
+          if (diffClose && d <= radius * 2) return true;
+
+          return false;
+        });
+
+        if (shouldJoin) {
+          cluster.push(ev);
+          used.add(ev.id);
+          expanded = true;
+        }
+      }
+    }
+
+    clusters.push(cluster);
+  }
+
+  return clusters;
+}
+
 /* ===== Draw ===== */
 function draw() {
   // 既存マーカーを削除
@@ -243,7 +294,13 @@ function draw() {
   const selectedSession = document.getElementById("sessionSelect").value;
 
   let eventsToShow = allEvents.filter(ev => selectedSession === "all" || ev.sessionId === selectedSession);
-  const groups = groupEvents(eventsToShow, groupingTolerance);
+  let groups;
+
+  if (groupingTolerance === "smart") {
+    groups = groupEventsSmart(eventsToShow, 6);
+  } else {
+    groups = groupEvents(eventsToShow, groupingTolerance);
+  }
 
   groups.forEach(group => {
     const avgLat = group.reduce((s, ev) => s + ev.lat, 0) / group.length;
