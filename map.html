@@ -17,7 +17,7 @@ html, body { height:100%; margin:0; }
   border-radius:8px;
   box-shadow:0 0 6px rgba(0,0,0,.25);
   z-index:1000;
-  width: 150px;  
+  width:190px;
   font-size:13px;
 }
 
@@ -71,9 +71,16 @@ button { width:100%; margin-top:4px; padding:4px; cursor:pointer; }
     <label><input type="checkbox" id="f_hill" checked> 坂</label><br>
     <label><input type="checkbox" id="f_flat" checked> 平地</label>
 
+    <br>
+    <label>セッション選択:
+      <select id="sessionSelect">
+        <option value="all">全表示</option>
+      </select>
+    </label>
+
     <hr>
 
-    <button id="bulkGT">一括GT保存</button>
+    <button id="bulkGT">未入力に一括GT保存</button>
   </div>
 
   <hr>
@@ -102,7 +109,8 @@ import {
   collection,
   getDocs,
   setDoc,
-  doc
+  doc,
+  deleteDoc
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
 /* ===== Firebase ===== */
@@ -152,6 +160,19 @@ async function loadGT() {
   });
 }
 
+/* ===== Populate Session Select ===== */
+function populateSessionSelect() {
+  const select = document.getElementById("sessionSelect");
+  const sessionIds = Array.from(new Set(allEvents.map(ev => ev.sessionId))).sort();
+  sessionIds.forEach(id => {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    select.appendChild(opt);
+  });
+}
+document.getElementById("sessionSelect").onchange = draw;
+
 /* ===== Initial View ===== */
 async function setInitialView(events) {
   if (navigator.geolocation) {
@@ -177,8 +198,12 @@ function draw() {
   markers = [];
 
   const mode = document.querySelector("input[name=viewMode]:checked").value;
+  const selectedSession = document.getElementById("sessionSelect").value;
 
   allEvents.forEach(ev => {
+    // sessionIdフィルタ
+    if (selectedSession !== "all" && ev.sessionId !== selectedSession) return;
+
     let label;
     if (mode === "gt") {
       label = gtMap[ev.id] || null;
@@ -210,7 +235,10 @@ zRatio: ${ev.features.zRatio.toFixed(2)}<br>
 <button class="step" onclick="saveGT('${ev.id}','step')">段差</button>
 <button class="curve" onclick="saveGT('${ev.id}','curve')">カーブ</button>
 <button class="hill" onclick="saveGT('${ev.id}','hill')">坂</button>
-<button class="flat" onclick="saveGT('${ev.id}','flat')">平地</button>
+<button class="flat" onclick="saveGT('${ev.id}','flat')">平地</button><br>
+<div style="text-align:right; margin-top:2px;">
+  <span style="color:red; font-size:12px; cursor:pointer;" onclick="deleteGT('${ev.id}')">削除</span>
+</div>
 `);
 
     markers.push(m);
@@ -239,13 +267,21 @@ function applyFilter() {
   });
 }
 
-/* ===== Save GT (更新可能) ===== */
+/* ===== Save GT ===== */
 window.saveGT = async (eventId, gt) => {
   await setDoc(doc(db, "event_labels", eventId), {
     eventId,
     groundTruth: gt,
     labeledAt: new Date().toISOString()
   });
+  await loadGT();
+  draw();
+};
+
+/* ===== Delete GT ===== */
+window.deleteGT = async (eventId) => {
+  if (!confirm("本当にこのデータを削除しますか？")) return;
+  await deleteDoc(doc(db, "event_labels", eventId));
   await loadGT();
   draw();
 };
@@ -266,14 +302,7 @@ document.getElementById("bulkGT").onclick = async () => {
   }
   await loadGT();
   draw();
-  alert("一括GT保存完了");
 };
-
-/* ===== Init ===== */
-["f_step","f_curve","f_hill","f_flat"].forEach(id =>
-  document.getElementById(id).onchange = applyFilter
-);
-document.querySelectorAll("input[name=viewMode]").forEach(r => r.onchange = draw);
 
 /* ===== Panel Toggle ===== */
 const toggleBtn = document.getElementById("togglePanel");
@@ -288,9 +317,16 @@ toggleBtn.onclick = () => {
   }
 };
 
-/* ===== Load and Draw ===== */
+/* ===== Init ===== */
+["f_step","f_curve","f_hill","f_flat"].forEach(id =>
+  document.getElementById(id).onchange = applyFilter
+);
+document.querySelectorAll("input[name=viewMode]").forEach(r => r.onchange = draw);
+
+/* ===== Load Data and Draw ===== */
 allEvents = await loadEvents();
 await loadGT();
+populateSessionSelect();
 await setInitialView(allEvents);
 draw();
 </script>
