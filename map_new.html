@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Barrier Map - Evaluation</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<style>
+html, body { height:100%; margin:0; font-family: -apple-system, sans-serif; }
+#map { width:100%; height:100%; }
+
+/* === パネルデザイン === */
+.panel {
+  position:absolute;
+  top:10px; left:10px;
+  background:white;
+  padding:10px;
+  border-radius:8px;
+  box-shadow:0 0 6px rgba(0,0,0,.25);
+  z-index:1000;
+  width:230px;
+  font-size:13px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.panel h3 { margin:0 0 6px; font-size:14px; border-bottom:1px solid #eee; padding-bottom:4px; }
+
+/* 凡例 */
+.legend div { display:flex; align-items:center; margin-bottom:4px; }
+.box { width:12px; height:12px; border-radius:50%; margin-right:6px; border:1px solid #ddd; }
+
+/* パネル開閉 */
+.panel-toggle {
+  display:block; width:100%; text-align:center; background:#eee;
+  padding:4px 0; cursor:pointer; border-radius:4px; margin-bottom:6px; font-size:12px;
+}
+#panelContent { display:block; }
+
+/* コントロール */
+.mode, .group-panel { margin-bottom:10px; }
+.group-panel { margin-top:8px; padding-top:6px; border-top:1px solid #eee; }
+label { display:flex; align-items:center; margin-bottom:4px; cursor:pointer; }
+input[type="radio"], input[type="checkbox"] { margin-right:6px; }
+select { width:100%; margin-top:2px; padding:2px; }
+
+button#bulkGT { 
+  width:100%; padding:6px; cursor:pointer; border:1px solid #ccc; 
+  border-radius:4px; background:#f9f9f9; margin-top:4px;
+}
+button#bulkGT:hover { background:#eee; }
+
+/* === ポップアップ (モダン版ボタン) === */
+.popup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
+.popup-btn { 
+  padding: 4px 2px; border: 1px solid #ddd; border-radius: 4px; 
+  background: white; cursor: pointer; font-size: 11px; font-weight: bold; width: 100%; text-align: center;
+}
+.popup-btn:hover { opacity: 0.8; }
+.popup-btn.active { box-shadow: inset 0 0 0 2px rgba(0,0,0,0.3); transform: scale(0.98); }
+
+.tag { padding: 2px 5px; border-radius: 4px; font-size: 10px; color: white; margin-left: 4px; display:inline-block; }
+.tag.auto { background: #777; }
+.tag.gt { background: #000; }
+
+.c-step { background: #f44336; color: white; border:none; }
+.c-curve { background: #2196f3; color: white; border:none; }
+.c-hill { background: orange; color: white; border:none; }
+.c-flat { background: #4caf50; color: white; border:none; }
+</style>
+</head>
+
+<body>
+<div id="map"></div>
+
+<div class="panel">
+  <div class="panel-toggle" id="togglePanel">▲ パネルを閉じる</div>
+  <div id="panelContent">
+    <h3>表示モード</h3>
+    <div class="mode">
+      <label><input type="radio" name="viewMode" value="auto" checked> 自動判定 (Auto)</label>
+      <label><input type="radio" name="viewMode" value="gt"> 正解データ (GT)</label>
+    </div>
+
+    <h3>表示フィルタ</h3>
+    <label><input type="checkbox" id="f_step" checked> 段差 (Step)</label>
+    <label><input type="checkbox" id="f_curve" checked> カーブ (Curve)</label>
+    <label><input type="checkbox" id="f_hill" checked> 坂 (Hill)</label>
+    <label><input type="checkbox" id="f_flat" checked> 平地 (Flat)</label>
+
+    <div style="margin-top:8px;">
+      <label>セッション:
+        <select id="sessionSelect">
+          <option value="all">全表示</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="group-panel">
+      <h3>グルーピング (3m)</h3>
+      <label><input type="radio" name="grouping" value="on" checked> ON (まとめる)</label>
+      <label><input type="radio" name="grouping" value="off"> OFF (個別表示)</label>
+    </div>
+
+    <button id="bulkGT">未入力に一括GT保存</button>
+  </div>
+
+  <hr style="border:0; border-top:1px solid #eee; margin:10px 0;">
+
+  <h3>凡例</h3>
+  <div class="legend">
+    <div><span class="box" style="background:#f44336;"></span>段差</div>
+    <div><span class="box" style="background:#2196f3;"></span>カーブ</div>
+    <div><span class="box" style="background:orange;"></span>坂</div>
+    <div><span class="box" style="background:#4caf50;"></span>平地</div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+/* ===== Config ===== */
+const CONFIG = {
+  colors: { step: "#f44336", curve: "#2196f3", hill: "orange", flat: "#4caf50", unknown: "#ccc" },
+  labelNames: { step: "段差", curve: "カーブ", hill: "坂", flat: "平地" },
+  labels: ["step", "curve", "hill", "flat"]
+};
+
+/* ===== Firebase ===== */
+const app = initializeApp({ apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo", projectId: "bike-barrier-detector-1e128" });
+const db = getFirestore(app);
+
+/* ===== Map ===== */
+const map = L.map("map").setView([35.681, 139.767], 15);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png").addTo(map);
+const markerLayer = L.layerGroup().addTo(map);
+
+/* ===== State ===== */
+let allEvents = [];
+let gtMap = {}; 
+let groupingMode = "on"; 
+
+/* ===== Logic: Grouping (3m) ===== */
+function groupEvents(events) {
+  if (groupingMode === "off") return events.map(ev => [ev]);
+
+  const radius = 3; 
+  const clusters = [];
+  const used = new Set();
+
+  function dist(a, b) {
+    const dx = (a.lat - b.lat) * 111000;
+    const dy = (a.lng - b.lng) * 111000;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  for (let i = 0; i < events.length; i++) {
+    if (used.has(events[i].id)) continue;
+    const cluster = [events[i]];
+    used.add(events[i].id);
+
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (const ev of events) {
+        if (used.has(ev.id)) continue;
+        const shouldJoin = cluster.some(c => dist(c, ev) <= radius);
+        if (shouldJoin) {
+          cluster.push(ev);
+          used.add(ev.id);
+          expanded = true;
+        }
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
+}
+
+/* ===== Load Data ===== */
+async function loadData() {
+  const [evSnap, gtSnap] = await Promise.all([
+    getDocs(collection(db, "raw_events")),
+    getDocs(collection(db, "event_labels"))
+  ]);
+  allEvents = evSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  gtMap = {};
+  gtSnap.docs.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
+  
+  populateSessionSelect();
+  if (allEvents.length) {
+    const last = allEvents[allEvents.length - 1];
+    map.setView([last.lat, last.lng], 15);
+  }
+  draw();
+}
+
+function populateSessionSelect() {
+  const select = document.getElementById("sessionSelect");
+  const sessions = Array.from(new Set(allEvents.map(ev => ev.sessionId))).sort();
+  sessions.forEach(id => {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = id;
+    select.appendChild(opt);
+  });
+}
+
+/* ===== Draw ===== */
+function draw() {
+  markerLayer.clearLayers();
+  const viewMode = document.querySelector("input[name=viewMode]:checked").value;
+  const sessionFilter = document.getElementById("sessionSelect").value;
+  const filters = {
+    step: document.getElementById("f_step").checked,
+    curve: document.getElementById("f_curve").checked,
+    hill: document.getElementById("f_hill").checked,
+    flat: document.getElementById("f_flat").checked
+  };
+
+  const eventsToShow = allEvents.filter(ev => sessionFilter === "all" || ev.sessionId === sessionFilter);
+  const groups = groupEvents(eventsToShow);
+
+  groups.forEach(group => {
+    const avgLat = group.reduce((s, ev) => s + ev.lat, 0) / group.length;
+    const avgLng = group.reduce((s, ev) => s + ev.lng, 0) / group.length;
+
+    // 多数決ラベル
+    const counts = {};
+    group.forEach(ev => {
+      const l = viewMode === "gt" ? (gtMap[ev.id] || ev.autoLabel) : ev.autoLabel;
+      counts[l] = (counts[l] || 0) + 1;
+    });
+    const maxLabel = Object.keys(counts).reduce((a, b) => counts[a] >= counts[b] ? a : b);
+    
+    if (!filters[maxLabel]) return;
+
+    const isUnlabeled = group.every(ev => !gtMap[ev.id]);
+    const color = CONFIG.colors[maxLabel] || "#999";
+
+    const m = L.circleMarker([avgLat, avgLng], {
+      radius: groupingMode === "off" ? 6 : 8,
+      color: "white",
+      weight: 1.5,
+      fillColor: color,
+      fillOpacity: isUnlabeled ? 0.4 : 0.8
+    }).addTo(markerLayer);
+
+    m.bindPopup(() => createPopupContent(group));
+  });
+}
+
+function createPopupContent(group) {
+  const div = document.createElement("div");
+  div.style.minWidth = "180px";
+  
+  // 複数イベントがある場合は上位5件のみ表示
+  const items = group.slice(0, 5);
+  
+  items.forEach(ev => {
+    const auto = ev.autoLabel || "?";
+    const gt = gtMap[ev.id];
+    
+    const row = document.createElement("div");
+    row.style.cssText = "border-top:1px solid #eee; padding:6px 0; margin-top:4px;";
+    
+    let statusHtml = `<span class="tag auto">AI: ${CONFIG.labelNames[auto]||auto}</span>`;
+    if (gt) {
+      statusHtml += ` <span class="tag gt" style="background:${CONFIG.colors[gt]}">正: ${CONFIG.labelNames[gt]}</span>`;
+    }
+    
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <span style="font-size:10px; color:#999;">ID: ${ev.id.substr(0,4)}</span>
+        <div>${statusHtml}</div>
+      </div>
+      <div class="popup-grid">
+        ${CONFIG.labels.map(l => `
+          <button class="popup-btn c-${l} ${gt===l?'active':''}" 
+            onclick="window.setLabel('${ev.id}', '${l}')">${CONFIG.labelNames[l]}</button>
+        `).join('')}
+      </div>
+      <div style="text-align:right; margin-top:4px;">
+         <a href="#" onclick="window.delEvent('${ev.id}')" style="color:#ccc; font-size:10px; text-decoration:none;">🗑 削除</a>
+      </div>
+    `;
+    div.appendChild(row);
+  });
+
+  if (group.length > 5) {
+    const more = document.createElement("div");
+    more.style.cssText = "text-align:center; font-size:10px; color:#999; margin-top:4px;";
+    more.textContent = `...他 ${group.length - 5} 件`;
+    div.appendChild(more);
+  }
+  
+  return div;
+}
+
+/* ===== Actions ===== */
+window.setLabel = async (eventId, label) => {
+  gtMap[eventId] = label;
+  draw(); 
+  await setDoc(doc(db, "event_labels", eventId), {
+    eventId, groundTruth: label, labeledAt: new Date().toISOString()
+  });
+};
+
+window.delEvent = async (eventId) => {
+  if (!confirm("削除しますか？")) return;
+  await deleteDoc(doc(db, "raw_events", eventId));
+  if (gtMap[eventId]) await deleteDoc(doc(db, "event_labels", eventId));
+  allEvents = allEvents.filter(e => e.id !== eventId);
+  delete gtMap[eventId];
+  draw();
+};
+
+document.getElementById("bulkGT").onclick = async () => {
+  const targets = allEvents.filter(ev => !gtMap[ev.id]);
+  if (!targets.length || !confirm(`${targets.length}件を一括保存しますか？`)) return;
+  for (const ev of targets) {
+    await setDoc(doc(db, "event_labels", ev.id), {
+      eventId: ev.id, groundTruth: ev.autoLabel, labeledAt: new Date().toISOString(), bulk: true
+    });
+    gtMap[ev.id] = ev.autoLabel;
+  }
+  draw();
+};
+
+/* ===== UI Events ===== */
+document.getElementById("togglePanel").onclick = () => {
+  const content = document.getElementById("panelContent");
+  const btn = document.getElementById("togglePanel");
+  content.style.display = content.style.display === "none" ? "block" : "none";
+  btn.textContent = content.style.display === "none" ? "▼ パネルを開く" : "▲ パネルを閉じる";
+};
+
+["f_step","f_curve","f_hill","f_flat"].forEach(id=>document.getElementById(id).onchange=draw);
+document.querySelectorAll("input[name=viewMode]").forEach(r=>r.onchange=draw);
+document.querySelectorAll("input[name=grouping]").forEach(r=>{
+  r.onchange = ()=> { groupingMode = r.value; draw(); }
+});
+document.getElementById("sessionSelect").onchange = draw;
+
+loadData();
+</script>
+</body>
+</html>

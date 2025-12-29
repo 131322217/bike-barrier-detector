@@ -2,221 +2,219 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>段差検出 実験（experiment.html）</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spatial Filter Map - Real Logic</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
 <style>
-body{
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  margin:16px;
-}
-h2{margin-top:0;}
-.controls{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-  gap:12px;
-  margin-bottom:12px;
-}
-label{font-size:13px;}
-select,input[type=range]{width:100%;}
-button{
-  padding:6px 12px;
-  font-size:14px;
-}
-table{
-  border-collapse:collapse;
-  width:100%;
-  margin-top:12px;
-  font-size:13px;
-}
-th,td{
-  border:1px solid #ccc;
-  padding:6px;
-  text-align:center;
-}
-th{background:#f0f0f0;}
-.note{
-  font-size:12px;
-  color:#555;
-  margin-top:8px;
-}
+  html, body { height:100%; margin:0; font-family: -apple-system, sans-serif; background: #f0f2f5; }
+  #map { width:100%; height:100%; }
+  .ui-panel {
+    position:absolute; top:10px; right:10px; background:white;
+    padding:20px; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.15);
+    z-index:1000; width:300px;
+  }
+  h3 { margin: 0 0 15px 0; font-size: 16px; color: #1a73e8; border-bottom: 2px solid #e8f0fe; padding-bottom: 8px; }
+  .slider-group { background: #e8f0fe; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #1a73e8; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+  .stat-box { background: #f8f9fa; padding: 8px; border-radius: 8px; text-align: center; border: 1px solid #eee; }
+  .stat-label { font-size: 10px; color: #70757a; display: block; }
+  .stat-value { font-size: 16px; font-weight: bold; }
+  
+  .legend { font-size: 11px; background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
+  .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
 </style>
 </head>
-
 <body>
-<h2>段差検出 実験評価（再分類）</h2>
 
-<div class="controls">
-  <div>
-    <label>分類式</label>
-    <select id="formula">
-      <option value="old">旧式（従来）</option>
-      <option value="new">新式（厳しめ）</option>
-    </select>
+<div id="map"></div>
+
+<div class="ui-panel">
+  <h3>🔍 空間フィルタ地図 (実力判定版)</h3>
+  
+  <div class="slider-group">
+    <label style="font-size:13px; font-weight:bold;">半径: <span id="radVal" style="float:right;">4.0</span>m</label>
+    <input type="range" id="filterRad" min="0" max="15" step="0.5" value="4.0">
   </div>
 
-  <div>
-    <label>特徴量セット</label>
-    <select id="featureSet">
-      <option value="1">① diffMaxのみ</option>
-      <option value="2">② diffMax + zRatio</option>
-      <option value="3">③ + zConsistency</option>
-      <option value="4">④ + xyRatio（フル）</option>
-    </select>
+  <div class="stat-grid">
+    <div class="stat-box" style="grid-column: span 2; border-bottom: 3px solid #1a73e8;">
+      <span class="stat-label">F1 SCORE</span>
+      <span id="stat_f1" class="stat-value">-</span>
+    </div>
+    <div class="stat-box">
+      <span class="stat-label">誤検出(FP)</span>
+      <span id="stat_fp" class="stat-value" style="color:#ff69b4">-</span>
+    </div>
+    <div class="stat-box">
+      <span class="stat-label">見逃し(FN)</span>
+      <span id="stat_fn" class="stat-value" style="color:#ff8c00">-</span>
+    </div>
   </div>
 
-  <div>
-    <label>diffMax閾値: <span id="diffVal">45</span></label>
-    <input type="range" id="diffTh" min="30" max="70" step="5" value="45">
-  </div>
-
-  <div>
-    <label>zRatio閾値: <span id="zVal">0.60</span></label>
-    <input type="range" id="zTh" min="0.3" max="0.9" step="0.05" value="0.6">
+  <div class="legend">
+    <div class="legend-item"><span class="dot" style="background:#dc3545"></span>正解 (TP)</div>
+    <div class="legend-item"><span class="dot" style="background:#ff69b4"></span>誤検出 (FP)</div>
+    <div class="legend-item"><span class="dot" style="background:#1a73e8"></span>フィルタ除去 (FP回避)</div>
+    <div class="legend-item"><span class="dot" style="background:#ff8c00"></span>見逃し (FN)</div>
   </div>
 </div>
 
-<button id="run">再計算</button>
-
-<table>
-<thead>
-<tr>
-  <th>分類式</th>
-  <th>特徴量</th>
-  <th>diff閾値</th>
-  <th>zRatio閾値</th>
-  <th>正答率</th>
-  <th>段差の適合率</th>
-  <th>段差の再現率</th>
-  <th>F1スコア</th>
-  <th>誤検出</th>
-  <th>見逃し</th>
-</tr>
-</thead>
-<tbody id="tbody"></tbody>
-</table>
-
-<div class="note">
-・正答率：全イベントでどれだけ当たったか<br>
-・適合率：段差と出したものがどれだけ本当に段差か<br>
-・再現率：本当の段差をどれだけ拾えたか
-</div>
-
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-/* Firebase */
-const app = initializeApp({
-  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
-  projectId: "bike-barrier-detector-1e128"
-});
+// Firebase設定
+const app = initializeApp({ apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo", projectId: "bike-barrier-detector-1e128" });
 const db = getFirestore(app);
 
-/* Load data */
-const eventsSnap = await getDocs(collection(db,"raw_events"));
-const events = eventsSnap.docs.map(d=>({id:d.id,...d.data()}));
+// マップ初期化
+const map = L.map("map", { zoomControl: false }).setView([35.681, 139.767], 15);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png").addTo(map);
+let layerGroup = L.layerGroup().addTo(map);
 
-const labelsSnap = await getDocs(collection(db,"event_labels"));
-const gt = {};
-labelsSnap.forEach(d=>{
-  const v=d.data();
-  gt[v.eventId]=v.groundTruth;
-});
+// データ変数
+let allEvents = [], gtMap = {};
+const FIXED_DIFF = 50;
+const FIXED_ZRATIO = 0.60;
 
-/* Classification */
-function classify(features, formula, fs, diffTh, zTh){
-  const f=features||{};
-  const d=f.diffMax||0;
-  const zr=f.zRatio||0;
-  const zc=!!f.zConsistency;
-  const xy=f.xyRatio||0;
-
-  if(formula==="old"){
-    if(fs>=1 && d>=diffTh){
-      if(fs===1) return "step";
-      if(fs>=2 && zr>=zTh){
-        if(fs===2) return "step";
-        if(fs>=3 && !zc){
-          if(fs===3) return "step";
-          if(fs>=4 && xy<0.5) return "step";
-        }
-      }
-    }
-  }else{
-    /* 新式：誤検出抑制 */
-    if(d>=diffTh+5 && zr>=zTh+0.05 && !zc && xy<0.45){
-      return "step";
-    }
-  }
-  return "other";
+// 基本判定（AI単体の予測）
+function getBasePred(f) {
+  // 特徴量がない場合は判定不可(other)
+  if (!f || typeof f.diffMax === 'undefined') return "other";
+  return (f.diffMax >= FIXED_DIFF && f.zRatio >= FIXED_ZRATIO && !f.zConsistency) ? "step" : "other";
 }
 
-/* Evaluate */
-function evaluate(){
-  const formula=formulaSel.value;
-  const fs=Number(featureSet.value);
-  const diffTh=Number(diffThEl.value);
-  const zTh=Number(zThEl.value);
+// 距離計算 (Haversine formula)
+function getDist(e1, e2) {
+  const R = 6371000;
+  const dLat = (e2.lat - e1.lat) * Math.PI / 180;
+  const dLon = (e2.lng - e1.lng) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(e1.lat*Math.PI/180) * Math.cos(e2.lat*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
 
-  let TP=0,FP=0,FN=0,TN=0;
+// ★最重要：最終判定ロジック（グラフ側と完全統一）
+function getFinalPred(target, rad, pool) {
+  const base = getBasePred(target.features);
+  
+  // 半径0または元々otherなら何もしない
+  if (rad <= 0 || base === "other") return base;
+  
+  // 近所を探す（自分以外、かつ半径内、かつ有効な特徴量を持つデータのみ）
+  const neighbors = pool.filter(n => 
+    n.id !== target.id && 
+    getDist(target, n) <= rad &&
+    n.features && typeof n.features.diffMax !== 'undefined'
+  );
 
-  events.forEach(e=>{
-    const pred=classify(e.features,formula,fs,diffTh,zTh)==="step";
-    const truth=gt[e.id]==="step";
+  if (neighbors.length > 0) {
+    // 【修正済み】正解(gt)ではなく、予測(getBasePred)を見て多数決をとる
+    // これにより、誤検出の集団に釣られる現象も正しくシミュレートされる
+    const stepCount = neighbors.filter(n => getBasePred(n.features) === "step").length;
+    
+    // 支持率が50%以下なら却下
+    if (stepCount / neighbors.length <= 0.5) return "other";
+  }
+  
+  // 仲間がいない(0人)の場合は、自分の意見を通す
+  return "step";
+}
 
-    if(pred && truth) TP++;
-    else if(pred && !truth) FP++;
-    else if(!pred && truth) FN++;
-    else TN++;
+// データ読み込み
+async function load() {
+  const [eSnap, lSnap] = await Promise.all([
+    getDocs(collection(db, "raw_events")),
+    getDocs(collection(db, "event_labels"))
+  ]);
+  
+  // 正解ラベルのマッピング
+  lSnap.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
+  
+  // イベントデータの結合
+  allEvents = eSnap.docs.map(d => ({
+    id: d.id,
+    ...d.data(),
+    gt: gtMap[d.id] || "other"
+  }));
+  
+  // マップの表示範囲を調整
+  if (allEvents.length > 0) {
+    const group = new L.featureGroup(allEvents.map(e => L.marker([e.lat, e.lng])));
+    map.fitBounds(group.getBounds(), { padding: [50, 50] });
+  }
+  
+  render();
+}
+
+// 描画 & 集計
+function render() {
+  layerGroup.clearLayers();
+  
+  const rad = parseFloat(document.getElementById("filterRad").value);
+  document.getElementById("radVal").textContent = rad.toFixed(1);
+  
+  let tp=0, fp=0, fn=0;
+
+  allEvents.forEach(ev => {
+    // データ欠損（featuresなし）は集計からも地図からも除外
+    if (!ev.features || typeof ev.features.diffMax === 'undefined') return;
+
+    const base = getBasePred(ev.features);
+    const pred = getFinalPred(ev, rad, allEvents);
+    const truth = ev.gt === "step" ? "step" : "other";
+    
+    let color = "#bbb", opacity = 0.3, radius = 4;
+    let isImportant = false;
+
+    if (pred === "step" && truth === "step") {
+      // 正解 (TP)
+      color = "#dc3545"; opacity = 0.8; radius = 6; tp++;
+      isImportant = true;
+    } 
+    else if (pred === "step" && truth !== "step") {
+      // 誤検出 (FP)
+      color = "#ff69b4"; opacity = 0.8; radius = 6; fp++;
+      isImportant = true;
+    }
+    else if (base === "step" && pred === "other" && truth !== "step") {
+      // フィルタ成功 (青色): 元々誤検出だったが、フィルタで救った
+      color = "#1a73e8"; opacity = 0.6; radius = 5;
+      isImportant = true;
+    }
+    else if (truth === "step" && pred !== "step") {
+      // 見逃し (FN): 元々見逃し、またはフィルタで消してしまった
+      color = "#ff8c00"; opacity = 0.8; radius = 6; fn++;
+      isImportant = true;
+    }
+
+    // 地図に見せるのは「重要な点（TP/FP/FN/救済）」のみ
+    if (isImportant) {
+      L.circleMarker([ev.lat, ev.lng], {
+        radius: radius,
+        color: "white",
+        weight: 1,
+        fillColor: color,
+        fillOpacity: opacity
+      }).addTo(layerGroup);
+    }
   });
 
-  const total = TP+FP+FN+TN;
-  const acc   = (TP+TN)/total;
-  const prec  = TP/(TP+FP || 1);
-  const rec   = TP/(TP+FN || 1);
-  const f1    = (2 * prec * rec) / (prec + rec || 1);
+  // スコア計算
+  const p = tp / (tp + fp || 1);
+  const r = tp / (tp + fn || 1);
+  const f1 = (2 * p * r) / (p + r || 1);
 
-  return {
-    formula,
-    fs,
-    diffTh,
-    zTh,
-    acc,
-    prec,
-    rec,
-    f1,
-    FP,
-    FN
-  };
+  document.getElementById("stat_f1").textContent = f1.toFixed(3);
+  document.getElementById("stat_fp").textContent = fp;
+  document.getElementById("stat_fn").textContent = fn;
 }
 
-/* UI */
-const formulaSel=document.getElementById("formula");
-const featureSet=document.getElementById("featureSet");
-const diffThEl=document.getElementById("diffTh");
-const zThEl=document.getElementById("zTh");
-const tbody=document.getElementById("tbody");
+// イベントリスナー
+document.getElementById("filterRad").oninput = render;
 
-diffThEl.oninput=()=>diffVal.textContent=diffThEl.value;
-zThEl.oninput=()=>zVal.textContent=zThEl.value;
-
-document.getElementById("run").onclick=()=>{
-  const r=evaluate();
-  const tr=document.createElement("tr");
-  tr.innerHTML=`
-    <td>${r.formula}</td>
-    <td>${r.fs}</td>
-    <td>${r.diffTh}</td>
-    <td>${r.zTh.toFixed(2)}</td>
-    <td>${r.acc.toFixed(2)}</td>
-    <td>${r.prec.toFixed(2)}</td>
-    <td>${r.rec.toFixed(2)}</td>
-    <td>${r.f1.toFixed(2)}</td>
-    <td>${r.FP}</td>
-    <td>${r.FN}</td>
-  `;
-  tbody.appendChild(tr);
-};
+// 開始
+load();
 </script>
 </body>
 </html>

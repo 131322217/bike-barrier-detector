@@ -2,354 +2,176 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Evaluation / 判定可視化</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Step Detection Dashboard - Final Ver</title>
 <script src="https://cdn.plot.ly/plotly-2.25.2.min.js"></script>
-
 <style>
-body {
-  font-family: sans-serif;
-  margin: 20px;
-  text-align: center;
-}
-
-#plot {
-  width: 95%;
-  max-width: 1100px;
-  height: 650px;
-  margin: 20px auto;
-}
-
-button {
-  margin: 4px;
-  padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-}
+  body { font-family: -apple-system, sans-serif; margin: 0; background: #f4f7f9; color: #333; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+  header { background: #1a73e8; color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+  .nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+  button { padding: 12px 20px; border: none; border-radius: 8px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+  button.active { background: #1a73e8; color: white; }
+  .chart-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); height: 550px; position: relative; }
+  .info-tag { position: absolute; top: 10px; right: 20px; background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; border: 1px solid #1a73e8; }
 </style>
 </head>
-
 <body>
-
-<h1>自動判定・GT 評価 / 判定式可視化</h1>
-
-<div>
-  <button id="btnScatter">判定式（diff × xyMean）</button>
-  <button id="btnHist">diff 分布</button>
-  <button id="btnConfusion">自動判定 vs GT</button>
-  <button id="btnDecision">判定式決定説明</button>
-  <button id="btnMetrics">評価指標（表）</button>
-  <button id="btnDownloadCsv">CSVをダウンロード</button>
-  <button id="btnDownloadAll">イベント全波形データCSV</button>
-  <button id="btnScore">スコア可視化</button>
+<div class="container">
+  <header>
+    <h1 style="margin:0; font-size:20px;">段差検出：評価ダッシュボード</h1>
+    <p style="margin:5px 0 0 0; opacity:0.8; font-size:13px;">正規版ロジック（カーブ0件表示・n数表示対応）</p>
+  </header>
+  <div class="nav">
+    <button id="btn1" class="active">① 特徴量分布 (正解別)</button>
+    <button id="btn2">② F1感度分析</button>
+    <button id="btn3">③ 導入効果</button>
+  </div>
+  <div class="chart-card">
+    <div id="bestRadiusTag" class="info-tag" style="display:none;"></div>
+    <div id="plot" style="width:100%; height:100%;"></div>
+  </div>
 </div>
-
-<div id="plot"></div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-/* Firebase */
-const app = initializeApp({
-  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
-  projectId: "bike-barrier-detector-1e128"
-});
+const app = initializeApp({ apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo", projectId: "bike-barrier-detector-1e128" });
 const db = getFirestore(app);
 
-/* 定義 */
-const KEYS = ["step","curve","hill","flat"];
-const LABEL = { step:"段差", curve:"カーブ", hill:"坂", flat:"平地" };
-const COLOR = { step:"red", curve:"blue", hill:"orange", flat:"green" };
+const FIXED_DIFF = 50, FIXED_ZRATIO = 0.60;
+let allData = [];
+let bestR = 0, bestF1 = 0;
 
-/* データ取得 */
-const rawSnap = await getDocs(collection(db,"raw_events"));
-const gtSnap  = await getDocs(collection(db,"event_labels"));
-
-const rawEvents = rawSnap.docs.map(d => ({ id:d.id, ...d.data() }));
-const gtMap = {};
-gtSnap.docs.forEach(d => {
-  const r = d.data();
-  gtMap[r.eventId] = r.groundTruth;
-});
-
-/* 整形 */
-const rows = rawEvents
-  .filter(ev => ev.features)
-  .map(ev => ({
-    auto: ev.autoLabel,
-    gt: gtMap[ev.id] ?? null,
-    diff: ev.features.diffMax,
-    xyRatio: ev.features.xyRatio,
-    xyMean: ev.features.xyRatio
-  }))
-  .filter(r => r.gt && r.auto);
-
-/* ---------- 既存グラフ ---------- */
-
-function drawScatter(){
-  const data = KEYS.map(k => {
-    const f = rows.filter(r => r.gt === k);
-    return {
-      x: f.map(r => r.diff),
-      y: f.map(r => r.xyMean),
-      mode: "markers",
-      type: "scattergl",
-      name: LABEL[k],
-      marker: { color: COLOR[k], size: 6, opacity: 0.7 }
-    };
-  });
-
-  Plotly.newPlot("plot", data, {
-    xaxis:{ title:"diffMax" },
-    yaxis:{ title:"xyRatio" },
-    margin:{t:40}
-  });
+function getBasePred(f) {
+  if (!f) return "other";
+  return (f.diffMax >= FIXED_DIFF && f.zRatio >= FIXED_ZRATIO && !f.zConsistency) ? "step" : "other";
+}
+function getDist(e1, e2) {
+  const R = 6371000, dLat = (e2.lat - e1.lat) * Math.PI / 180, dLon = (e2.lng - e1.lng) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(e1.lat*Math.PI/180) * Math.cos(e2.lat*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function getFinalPred(target, rad, pool) {
+  const base = getBasePred(target.features);
+  if (rad <= 0 || base === "other") return base;
+  const neighbors = pool.filter(n => 
+    n.id !== target.id && getDist(target, n) <= rad && n.features && typeof n.features.diffMax !== 'undefined'
+  );
+  if (neighbors.length > 0) {
+    const stepCount = neighbors.filter(n => getBasePred(n.features) === "step").length;
+    if (stepCount / neighbors.length <= 0.5) return "other";
+  }
+  return "step";
 }
 
-function drawHist(){
-  const data = KEYS.map(k => {
-    const f = rows.filter(r => r.gt === k);
-    return {
-      x: f.map(r => r.diff),
-      type: "histogram",
-      name: LABEL[k],
-      opacity: 0.6,
-      marker:{ color: COLOR[k] }
-    };
-  });
+async function init() {
+  const [eSnap, lSnap] = await Promise.all([getDocs(collection(db, "raw_events")), getDocs(collection(db, "event_labels"))]);
+  
+  const gtMap = {};
+  lSnap.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
+  
+  allData = eSnap.docs.map(d => ({
+    id: d.id, lat: d.data().lat, lng: d.data().lng, 
+    features: d.data().features || {}, 
+    // DBにないラベルは "flat" (平地) 扱いにする
+    gt: gtMap[d.id] || "flat" 
+  }));
 
-  Plotly.newPlot("plot", data, {
-    barmode:"overlay",
-    xaxis:{ title:"diffMax" },
-    yaxis:{ title:"count" },
-    margin:{t:40}
-  });
+  let maxF1 = -1;
+  for (let r = 0; r <= 15; r += 0.5) {
+    const m = calcMetrics(r);
+    if (m.f1 > maxF1) { maxF1 = m.f1; bestR = r; bestF1 = m.f1; }
+  }
+  document.getElementById("bestRadiusTag").style.display = "block";
+  document.getElementById("bestRadiusTag").textContent = `最適半径: ${bestR}m (F1: ${bestF1.toFixed(3)})`;
+  
+  drawScatter();
 }
 
-function drawConfusion(){
-  const matrix = {};
-  KEYS.forEach(a=>{
-    matrix[a]={};
-    KEYS.forEach(b=>matrix[a][b]=0);
+function calcMetrics(rad) {
+  let tp=0, fp=0, fn=0;
+  allData.forEach(ev => {
+    const truth = ev.gt === "step" ? "step" : "other"; 
+    const pred = getFinalPred(ev, rad, allData) === "step" ? "step" : "other";
+    if (pred === "step" && truth === "step") tp++; 
+    else if (pred === "step" && truth !== "step") fp++; 
+    else if (pred !== "step" && truth === "step") fn++;
   });
-
-  rows.forEach(r=>{ matrix[r.gt][r.auto]++; });
-
-  const z = KEYS.map(gt => KEYS.map(auto => matrix[gt][auto]));
-
-  Plotly.newPlot("plot", [{
-    z,
-    x: KEYS.map(k=>LABEL[k]),
-    y: KEYS.map(k=>LABEL[k]),
-    type:"heatmap",
-    colorscale:"Blues"
-  }],{
-    xaxis:{ title:"自動判定" },
-    yaxis:{ title:"正解(GT)" },
-    margin:{t:40}
-  });
+  const p = tp/(tp+fp||1), r = tp/(tp+fn||1);
+  return { p, r, f1: (2*p*r/(p+r||1)) };
 }
 
-function drawDecision(){
-  const data = KEYS.map(k => {
-    const f = rows.filter(r => r.gt === k);
-    return {
-      x: f.map(r => r.xyRatio),
-      y: f.map(r => r.diff),
-      mode:"markers",
-      type:"scattergl",
-      name: LABEL[k],
-      marker:{ color: COLOR[k], size:6, opacity:0.7 }
-    };
-  });
-
-  Plotly.newPlot("plot", data, {
-    xaxis:{ title:"xyRatio" },
-    yaxis:{ title:"diffMax" },
-    margin:{t:40}
-  });
-}
-
-/* ---------- NEW：評価指標（表） ---------- */
-function drawMetrics(){
-  const total = rows.length;
-  const accuracy = rows.filter(r => r.gt === r.auto).length / total;
-
-  const table = KEYS.map(k => {
-    const TP = rows.filter(r => r.gt===k && r.auto===k).length;
-    const FP = rows.filter(r => r.gt!==k && r.auto===k).length;
-    const FN = rows.filter(r => r.gt===k && r.auto!==k).length;
-
-    const precision = TP / (TP + FP || 1);
-    const recall = TP / (TP + FN || 1);
-    const f1 = 2 * precision * recall / (precision + recall || 1);
-
-    return {
-      label: LABEL[k],
-      p: precision,
-      r: recall,
-      f: f1
-    };
-  });
-
-  Plotly.newPlot("plot", [{
-    type:"table",
-    header:{
-      values:["クラス","正解率","適合率","再現率","F1"],
-      align:"center",
-      fill:{color:"#eee"}
-    },
-    cells:{
-      values:[
-        table.map(r=>r.label),
-        table.map(_=>accuracy.toFixed(2)),
-        table.map(r=>r.p.toFixed(2)),
-        table.map(r=>r.r.toFixed(2)),
-        table.map(r=>r.f.toFixed(2))
-      ],
-      align:"center"
-    }
-  }],{
-    margin:{t:20}
-  });
-}
-
-/* ---------- NEW：CSVダウンロード ---------- */
-function downloadCsv(){
-  const headers = ["eventId","autoLabel","groundTruth","diffMax","xyRatio"];
-  const lines = [headers.join(",")];
-
-  rawEvents.forEach(ev => {
-    if(!ev.features) return;
-    const gt = gtMap[ev.id] ?? "";
-    const line = [
-      ev.id,
-      ev.autoLabel ?? "",
-      gt,
-      ev.features.diffMax ?? "",
-      ev.features.xyRatio ?? ""
-    ].join(",");
-    lines.push(line);
-  });
-
-  const csvContent = lines.join("\n");
-  const blob = new Blob([csvContent], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "event_data.csv";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-/* ---------- イベントサンプル全波形データダウンロード ---------- */
-function downloadAllSamples() {
-  // 各イベントごとに全サンプルを展開
-  let csv = "eventId,autoLabel,groundTruth,timestamp,x,y,z,diff,lat,lng\n";
-  rawEvents.forEach(ev => {
-    if (!ev.samples) return;
-    const gt = gtMap[ev.id] ?? "";
-    ev.samples.forEach(s => {
-      csv += [
-        ev.id, ev.autoLabel, gt, s.timestamp, s.x, s.y, s.z, s.diff, s.lat, s.lng
-      ].join(",") + "\n";
-    });
-  });
-
-  /* ---------- NEW：スコア化可視化 ---------- */
-function drawScore(){
-  // スコア化
-  const scoredRows = rows.map(r => {
-    const score = r.diff * 0.6 + r.zRatio * 30 + r.xyRatio * 20; // 仮の重み
-    return {...r, score};
-  });
-
-  // イベントタイプごとにプロット
-  const data = KEYS.map(k => {
-    const f = scoredRows.filter(r => r.gt === k);
-    return {
-      x: f.map(r => r.score),
-      y: f.map(r => r.diff),
-      mode: "markers",
-      type: "scattergl",
-      name: LABEL[k],
-      marker: { color: COLOR[k], size: 6, opacity: 0.7 }
-    };
-  });
-
-  // 閾値ライン例（score=仮の境界）
-  const shapes = [
-    { type: 'line', x0: 50, x1: 50, y0: 0, y1: 100, line: {color: 'black', dash:'dot'} }, // score閾値例
-    { type: 'line', x0: 0, x1: 100, y0: 50, y1: 50, line: {color: 'red', dash:'dash'} }   // diffMax閾値例
+// ★修正版：散布図（Graph 1）
+function drawScatter() {
+  const categories = [
+    { key: "step",  label: "段差",   color: "#dc3545" }, // 赤
+    { key: "curve", label: "カーブ", color: "#1a73e8" }, // 青
+    { key: "hill",  label: "坂",     color: "#f9ab00" }, // 黄色
+    { key: "flat",  label: "平地",   color: "#28a745" }  // 緑
   ];
 
-  Plotly.newPlot("plot", data, {
-    xaxis: { title: "Score (diff*0.6 + zRatio*30 + xyRatio*20)" },
-    yaxis: { title: "diffMax" },
-    margin: { t: 40 },
-    shapes: shapes
-  });
-}
-
-
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "all_event_samples.csv";
-  a.click();
-  URL.revokeObjectURL(url);
-}
-/* ---------- NEW：スコア化可視化 ---------- */
-function drawScore(){
-  // スコア化
-  const scoredRows = rows.map(r => {
-    const score = r.diff * 0.6 + r.zRatio * 30 + r.xyRatio * 20; // 仮の重み
-    return {...r, score};
-  });
-
-  // イベントタイプごとにプロット
-  const data = KEYS.map(k => {
-    const f = scoredRows.filter(r => r.gt === k);
-    return {
-      x: f.map(r => r.score),
-      y: f.map(r => r.diff),
-      mode: "markers",
-      type: "scattergl",
-      name: LABEL[k],
-      marker: { color: COLOR[k], size: 6, opacity: 0.7 }
+  const traces = categories.map(cat => {
+    const d = allData.filter(r => r.gt === cat.key);
+    return { 
+      x: d.map(r => r.features.diffMax || 0), 
+      y: d.map(r => r.features.zRatio || 0), 
+      mode: 'markers', 
+      // 0件でも強制表示
+      name: `${cat.label} (${d.length})`, 
+      showlegend: true, 
+      marker: {
+        color: cat.color,
+        size: 7, opacity: 0.7,
+        line: { width: 1, color: 'white' }
+      },
+      type: 'scatter'
     };
   });
 
-  // 閾値ライン例（score=仮の境界）
-  const shapes = [
-    { type: 'line', x0: 50, x1: 50, y0: 0, y1: 100, line: {color: 'black', dash:'dot'} }, // score閾値例
-    { type: 'line', x0: 0, x1: 100, y0: 50, y1: 50, line: {color: 'red', dash:'dash'} }   // diffMax閾値例
-  ];
-
-  Plotly.newPlot("plot", data, {
-    xaxis: { title: "Score (diff*0.6 + zRatio*30 + xyRatio*20)" },
-    yaxis: { title: "diffMax" },
-    margin: { t: 40 },
-    shapes: shapes
+  Plotly.newPlot('plot', traces, { 
+    title: '特徴量分布 (正解ラベル別)', 
+    xaxis: {title: 'diffMax (衝撃強度)', range:[0, 200]}, 
+    yaxis: {title: 'zRatio (垂直成分比)', range:[0, 1.3]}, 
+    shapes: [{ 
+      type: 'rect', x0: FIXED_DIFF, y0: FIXED_ZRATIO, x1: 300, y1: 1.5, 
+      line: {color: 'red', dash: 'dash', width: 2}, fillcolor: 'rgba(255,0,0,0.05)' 
+    }],
+    legend: { title: { text: '正解ラベル(件数)' } },
+    // ★追加：右上に n=xxx を表示
+    annotations: [{
+      text: `n = ${allData.length}`,
+      x: 1, y: 1.05, 
+      xref: 'paper', yref: 'paper',
+      showarrow: false,
+      font: { size: 14, color: '#555', family: 'Arial, sans-serif' }
+    }]
   });
 }
 
-/* 初期表示 */
-drawScatter();
+function drawSensitivity() {
+  const radii = []; for(let r=0; r<=15; r+=0.5) radii.push(r);
+  const f1s = radii.map(r => calcMetrics(r).f1);
+  Plotly.newPlot('plot', [
+    { x: radii, y: f1s, mode: 'lines+markers', name: 'F1 Score', line: {shape: 'spline', color: '#1a73e8'} },
+    { x: [bestR], y: [bestF1], mode: 'markers', name: 'Best', marker: {color: 'red', size: 12} }
+  ], { title: '半径ごとのF1スコア変化', xaxis: {title: '半径(m)'}, yaxis: {range:[0,1]} });
+}
 
-/* ボタン */
-btnScatter.onclick = drawScatter;
-btnHist.onclick = drawHist;
-btnConfusion.onclick = drawConfusion;
-btnDecision.onclick = drawDecision;
-btnMetrics.onclick = drawMetrics;
-btnDownloadCsv.onclick = downloadCsv;
-btnDownloadAll.onclick = downloadAllSamples;
-btnScore.onclick = drawScore;
+function drawComp() {
+  const m0 = calcMetrics(0), mOpt = calcMetrics(bestR);
+  Plotly.newPlot('plot', [
+    { x: ['Prec','Recall','F1'], y: [m0.p, m0.r, m0.f1], name: '0m (Raw)', type: 'bar' },
+    { x: ['Prec','Recall','F1'], y: [mOpt.p, mOpt.r, mOpt.f1], name: `${bestR}m (Filtered)`, type: 'bar' }
+  ], { title: '導入効果', barmode: 'group', yaxis: {range:[0,1]} });
+}
+
+document.getElementById("btn1").onclick = (e) => { switchTab(e); drawScatter(); };
+document.getElementById("btn2").onclick = (e) => { switchTab(e); drawSensitivity(); };
+document.getElementById("btn3").onclick = (e) => { switchTab(e); drawComp(); };
+function switchTab(e) { document.querySelectorAll('button').forEach(b => b.classList.remove('active')); e.target.classList.add('active'); }
+
+init();
 </script>
 </body>
 </html>
