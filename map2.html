@@ -2,173 +2,163 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Barrier Map</title>
+<title>精度評価・比較マップ</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
 <style>
-html,body{height:100%;margin:0;}
-#map{height:100%;}
-
-.panel{
-  position:absolute;top:10px;left:10px;
-  background:#fff;padding:10px;
-  border-radius:8px;
-  box-shadow:0 0 6px rgba(0,0,0,.3);
-  z-index:1000;width:240px;font-size:13px;
-}
-.panel h3{margin:6px 0;font-size:14px;}
-.legend div{display:flex;align-items:center;margin-bottom:4px;}
-.box{width:12px;height:12px;border-radius:50%;margin-right:6px;}
-
-table{width:100%;border-collapse:collapse;font-size:12px;}
-th,td{border:1px solid #ccc;padding:2px;text-align:center;}
+  html, body { height:100%; margin:0; font-family: sans-serif; }
+  #map { width:100%; height:100%; }
+  .panel {
+    position:absolute; top:10px; left:10px; background:white;
+    padding:15px; border-radius:10px; box-shadow:0 0 10px rgba(0,0,0,0.2);
+    z-index:1000; width:280px; font-size:13px; max-height: 90vh; overflow-y: auto;
+  }
+  .stat-card { background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0; border-left: 4px solid #007bff; }
+  .slider-group { margin: 10px 0; }
+  input[type=range] { width: 100%; }
+  .legend-item { display: flex; align-items: center; margin-bottom: 3px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
 </style>
 </head>
-
 <body>
 <div id="map"></div>
-
 <div class="panel">
-  <h3>段差割合</h3>
-  <label><input type="radio" name="stepRatio" value="0.6" checked>60%</label>
-  <label><input type="radio" name="stepRatio" value="0.7">70%</label>
-  <label><input type="radio" name="stepRatio" value="0.8">80%</label>
-
-  <h3>表示</h3>
-  <label><input type="checkbox" id="showCandidate" checked>段差候補</label>
-
-  <h3>凡例</h3>
-  <div class="legend">
-    <div><span class="box" style="background:red"></span>段差</div>
-    <div><span class="box" style="background:purple"></span>段差候補</div>
-    <div><span class="box" style="background:blue"></span>カーブ</div>
-    <div><span class="box" style="background:orange"></span>坂</div>
-    <div><span class="box" style="background:green"></span>平地</div>
+  <h3>実験評価・比較設定</h3>
+  
+  <div class="stat-card">
+    <b>現在の精度統計</b><br>
+    正答率: <span id="stat_acc">-</span><br>
+    F1スコア: <span id="stat_f1">-</span><br>
+    誤検出(FP): <span id="stat_fp">-</span> / 見逃し(FN): <span id="stat_fn">-</span>
   </div>
 
-  <h3>件数</h3>
-  <table>
-    <thead>
-      <tr><th>種別</th><th>件数</th></tr>
-    </thead>
-    <tbody id="countTable"></tbody>
-  </table>
+  <div class="slider-group">
+    <label>分類アルゴリズム</label>
+    <select id="formula" style="width:100%">
+      <option value="old">旧式（段階評価）</option>
+      <option value="new">新式（厳格判定）</option>
+    </select>
+  </div>
+
+  <div class="slider-group">
+    <label>diffMax閾値: <span id="diffVal">45</span></label>
+    <input type="range" id="diffTh" min="30" max="70" step="5" value="45">
+  </div>
+
+  <div class="slider-group">
+    <label>zRatio閾値: <span id="zVal">0.60</span></label>
+    <input type="range" id="zTh" min="0.3" max="0.9" step="0.05" value="0.6">
+  </div>
+
+  <hr>
+  <h4>判定結果の凡例</h4>
+  <div class="legend-item"><span class="dot" style="background:#28a745"></span>一致 (正解 / TP)</div>
+  <div class="legend-item"><span class="dot" style="background:#dc3545"></span>誤検出 (判定ミス / FP)</div>
+  <div class="legend-item"><span class="dot" style="background:#007bff"></span>見逃し (未検出 / FN)</div>
+  <div class="legend-item"><span class="dot" style="background:#ccc"></span>その他（一致）</div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
 import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-/* Firebase */
 const app = initializeApp({
   apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
   projectId: "bike-barrier-detector-1e128"
 });
 const db = getFirestore(app);
 
-/* Map */
-const map = L.map("map").setView([35.681236,139.767125],14);
+const map = L.map("map").setView([35.681, 139.767], 15);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let allEvents=[];
-let markers=[];
-let stepRatio=0.6;
-const GROUP_RADIUS=10; // meter
+let allEvents = [];
+let gtMap = {};
+let markers = [];
 
-/* Utils */
-function dist(a,b){
-  return map.distance([a.lat,a.lng],[b.lat,b.lng]);
-}
-function color(label){
-  return {step:"red",step_candidate:"purple",curve:"blue",hill:"orange",flat:"green"}[label];
+// 分類ロジック (experiment.htmlから移植)
+function classify(f, formula, diffTh, zTh) {
+  const d = f.diffMax || 0;
+  const zr = f.zRatio || 0;
+  const zc = !!f.zConsistency;
+  const xy = f.xyRatio || 0;
+
+  if (formula === "old") {
+    if (d >= diffTh && zr >= zTh && !zc) return "step";
+  } else {
+    if (d >= diffTh + 5 && zr >= zTh + 0.05 && !zc && xy < 0.45) return "step";
+  }
+  return "other";
 }
 
-/* Load */
-async function load(){
-  const snap=await getDocs(collection(db,"raw_events"));
-  allEvents=snap.docs.map(d=>d.data());
-  draw();
+async function loadData() {
+  const [eSnap, lSnap] = await Promise.all([
+    getDocs(collection(db, "raw_events")),
+    getDocs(collection(db, "event_labels"))
+  ]);
+  allEvents = eSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  lSnap.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
+  render();
 }
 
-/* 距離ベースグルーピング */
-function groupByDistance(events){
-  const groups=[];
-  events.forEach(ev=>{
-    let added=false;
-    for(const g of groups){
-      if(dist(ev,g[0])<=GROUP_RADIUS){
-        g.push(ev);added=true;break;
-      }
+function render() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  const formula = document.getElementById("formula").value;
+  const diffTh = Number(document.getElementById("diffTh").value);
+  const zTh = Number(document.getElementById("zTh").value);
+
+  let tp=0, fp=0, fn=0, tn=0;
+
+  allEvents.forEach(ev => {
+    const truth = gtMap[ev.id] === "step" ? "step" : "other";
+    const pred = classify(ev.features, formula, diffTh, zTh);
+
+    let color = "#ccc"; // その他一致
+    if (pred === "step" && truth === "step") { color = "#28a745"; tp++; } // TP
+    else if (pred === "step" && truth !== "step") { color = "#dc3545"; fp++; } // FP
+    else if (pred !== "step" && truth === "step") { color = "#007bff"; fn++; } // FN
+    else { tn++; }
+
+    if (truth === "step" || pred === "step") {
+      const m = L.circleMarker([ev.lat, ev.lng], {
+        radius: 8, color: color, fillColor: color, fillOpacity: 0.7
+      }).addTo(map);
+      
+      m.bindPopup(`
+        <b>判定: ${pred}</b> (正解: ${truth})<br>
+        diffMax: ${ev.features.diffMax.toFixed(1)}<br>
+        zRatio: ${ev.features.zRatio.toFixed(2)}
+      `);
+      markers.push(m);
     }
-    if(!added) groups.push([ev]);
-  });
-  return groups;
-}
-
-/* グループ判定 */
-function decide(group){
-  const cnt={step:0,curve:0,hill:0,flat:0};
-  group.forEach(e=>cnt[e.autoLabel]++);
-  if(group.length===1 && cnt.step===1){
-    return {label:"step_candidate",ratio:1};
-  }
-  const ratio=cnt.step/group.length;
-  if(ratio>=stepRatio){
-    return {label:"step",ratio};
-  }
-  return {label:Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0][0],ratio};
-}
-
-/* Draw */
-function draw(){
-  markers.forEach(m=>map.removeLayer(m));
-  markers=[];
-
-  const counts={step:0,step_candidate:0,curve:0,hill:0,flat:0};
-
-  const groups=groupByDistance(allEvents);
-  groups.forEach(g=>{
-    const {label,ratio}=decide(g);
-    counts[label]++;
-
-    if(label==="step_candidate" && !showCandidate.checked) return;
-
-    const ev=g[0];
-    const m=L.circleMarker([ev.lat,ev.lng],{
-      radius:7,color:color(label),fillColor:color(label),fillOpacity:0.8
-    }).addTo(map);
-    m.bindPopup(`
-      <b>${label}</b><br>
-      段差割合:${(ratio*100).toFixed(0)}%<br>
-      グループ数:${g.length}
-    `);
-    markers.push(m);
   });
 
-  updateTable(counts);
+  // 統計更新
+  const acc = (tp + tn) / allEvents.length;
+  const prec = tp / (tp + fp || 1);
+  const rec = tp / (tp + fn || 1);
+  const f1 = (2 * prec * rec) / (prec + rec || 1);
+
+  document.getElementById("stat_acc").textContent = acc.toFixed(3);
+  document.getElementById("stat_f1").textContent = f1.toFixed(3);
+  document.getElementById("stat_fp").textContent = fp;
+  document.getElementById("stat_fn").textContent = fn;
 }
 
-/* 件数表 */
-function updateTable(c){
-  const tbody=document.getElementById("countTable");
-  tbody.innerHTML="";
-  Object.keys(c).forEach(k=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${k}</td><td>${c[k]}</td>`;
-    tbody.appendChild(tr);
-  });
-}
+// イベント設定
+document.getElementById("formula").onchange = render;
+document.getElementById("diffTh").oninput = (e) => {
+  document.getElementById("diffVal").textContent = e.target.value;
+  render();
+};
+document.getElementById("zTh").oninput = (e) => {
+  document.getElementById("zVal").textContent = Number(e.target.value).toFixed(2);
+  render();
+};
 
-/* UI */
-document.querySelectorAll("input[name=stepRatio]").forEach(r=>{
-  r.onchange=()=>{stepRatio=parseFloat(r.value);draw();}
-});
-showCandidate.onchange=draw;
-
-/* Init */
-load();
+loadData();
 </script>
 </body>
 </html>

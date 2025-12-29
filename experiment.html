@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>段差検出 実験（experiment.html）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  margin:16px;
+}
+h2{margin-top:0;}
+.controls{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:12px;
+  margin-bottom:12px;
+}
+label{font-size:13px;}
+select,input[type=range]{width:100%;}
+button{
+  padding:6px 12px;
+  font-size:14px;
+}
+table{
+  border-collapse:collapse;
+  width:100%;
+  margin-top:12px;
+  font-size:13px;
+}
+th,td{
+  border:1px solid #ccc;
+  padding:6px;
+  text-align:center;
+}
+th{background:#f0f0f0;}
+.note{
+  font-size:12px;
+  color:#555;
+  margin-top:8px;
+}
+</style>
+</head>
+
+<body>
+<h2>段差検出 実験評価（再分類）</h2>
+
+<div class="controls">
+  <div>
+    <label>分類式</label>
+    <select id="formula">
+      <option value="old">旧式（従来）</option>
+      <option value="new">新式（厳しめ）</option>
+    </select>
+  </div>
+
+  <div>
+    <label>特徴量セット</label>
+    <select id="featureSet">
+      <option value="1">① diffMaxのみ</option>
+      <option value="2">② diffMax + zRatio</option>
+      <option value="3">③ + zConsistency</option>
+      <option value="4">④ + xyRatio（フル）</option>
+    </select>
+  </div>
+
+  <div>
+    <label>diffMax閾値: <span id="diffVal">45</span></label>
+    <input type="range" id="diffTh" min="30" max="70" step="5" value="45">
+  </div>
+
+  <div>
+    <label>zRatio閾値: <span id="zVal">0.60</span></label>
+    <input type="range" id="zTh" min="0.3" max="0.9" step="0.05" value="0.6">
+  </div>
+</div>
+
+<button id="run">再計算</button>
+
+<table>
+<thead>
+<tr>
+  <th>分類式</th>
+  <th>特徴量</th>
+  <th>diff閾値</th>
+  <th>zRatio閾値</th>
+  <th>正答率</th>
+  <th>段差の適合率</th>
+  <th>段差の再現率</th>
+  <th>F1スコア</th>
+  <th>誤検出</th>
+  <th>見逃し</th>
+</tr>
+</thead>
+<tbody id="tbody"></tbody>
+</table>
+
+<div class="note">
+・正答率：全イベントでどれだけ当たったか<br>
+・適合率：段差と出したものがどれだけ本当に段差か<br>
+・再現率：本当の段差をどれだけ拾えたか
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+/* Firebase */
+const app = initializeApp({
+  apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo",
+  projectId: "bike-barrier-detector-1e128"
+});
+const db = getFirestore(app);
+
+/* Load data */
+const eventsSnap = await getDocs(collection(db,"raw_events"));
+const events = eventsSnap.docs.map(d=>({id:d.id,...d.data()}));
+
+const labelsSnap = await getDocs(collection(db,"event_labels"));
+const gt = {};
+labelsSnap.forEach(d=>{
+  const v=d.data();
+  gt[v.eventId]=v.groundTruth;
+});
+
+/* Classification */
+function classify(features, formula, fs, diffTh, zTh){
+  const f=features||{};
+  const d=f.diffMax||0;
+  const zr=f.zRatio||0;
+  const zc=!!f.zConsistency;
+  const xy=f.xyRatio||0;
+
+  if(formula==="old"){
+    if(fs>=1 && d>=diffTh){
+      if(fs===1) return "step";
+      if(fs>=2 && zr>=zTh){
+        if(fs===2) return "step";
+        if(fs>=3 && !zc){
+          if(fs===3) return "step";
+          if(fs>=4 && xy<0.5) return "step";
+        }
+      }
+    }
+  }else{
+    /* 新式：誤検出抑制 */
+    if(d>=diffTh+5 && zr>=zTh+0.05 && !zc && xy<0.45){
+      return "step";
+    }
+  }
+  return "other";
+}
+
+/* Evaluate */
+function evaluate(){
+  const formula=formulaSel.value;
+  const fs=Number(featureSet.value);
+  const diffTh=Number(diffThEl.value);
+  const zTh=Number(zThEl.value);
+
+  let TP=0,FP=0,FN=0,TN=0;
+
+  events.forEach(e=>{
+    const pred=classify(e.features,formula,fs,diffTh,zTh)==="step";
+    const truth=gt[e.id]==="step";
+
+    if(pred && truth) TP++;
+    else if(pred && !truth) FP++;
+    else if(!pred && truth) FN++;
+    else TN++;
+  });
+
+  const total = TP+FP+FN+TN;
+  const acc   = (TP+TN)/total;
+  const prec  = TP/(TP+FP || 1);
+  const rec   = TP/(TP+FN || 1);
+  const f1    = (2 * prec * rec) / (prec + rec || 1);
+
+  return {
+    formula,
+    fs,
+    diffTh,
+    zTh,
+    acc,
+    prec,
+    rec,
+    f1,
+    FP,
+    FN
+  };
+}
+
+/* UI */
+const formulaSel=document.getElementById("formula");
+const featureSet=document.getElementById("featureSet");
+const diffThEl=document.getElementById("diffTh");
+const zThEl=document.getElementById("zTh");
+const tbody=document.getElementById("tbody");
+
+diffThEl.oninput=()=>diffVal.textContent=diffThEl.value;
+zThEl.oninput=()=>zVal.textContent=zThEl.value;
+
+document.getElementById("run").onclick=()=>{
+  const r=evaluate();
+  const tr=document.createElement("tr");
+  tr.innerHTML=`
+    <td>${r.formula}</td>
+    <td>${r.fs}</td>
+    <td>${r.diffTh}</td>
+    <td>${r.zTh.toFixed(2)}</td>
+    <td>${r.acc.toFixed(2)}</td>
+    <td>${r.prec.toFixed(2)}</td>
+    <td>${r.rec.toFixed(2)}</td>
+    <td>${r.f1.toFixed(2)}</td>
+    <td>${r.FP}</td>
+    <td>${r.FN}</td>
+  `;
+  tbody.appendChild(tr);
+};
+</script>
+</body>
+</html>
