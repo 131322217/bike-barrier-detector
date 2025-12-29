@@ -144,7 +144,7 @@ async function init() {
 
 // === 描画 ===
 
-// ① 決定領域をわかりやすく表示（日本語）
+// ① 決定領域表示 + タイトル削除 + 右上N数
 function drawScatter() {
   hideMetrics();
   const categories = [
@@ -157,50 +157,61 @@ function drawScatter() {
     const d = allData.filter(r => r.gt === cat.key);
     return { 
       x: d.map(r => r.features.diffMax || 0), y: d.map(r => r.features.zRatio || 0), 
-      mode: 'markers', name: cat.label, marker: { color: cat.color, size: 7, opacity: 0.7 }
+      // 凡例に内訳(n)
+      mode: 'markers', name: `${cat.label} (n=${d.length})`, marker: { color: cat.color, size: 7, opacity: 0.7 }
     };
   });
 
   const layout = {
-    title: '特徴量分布と段差判定領域', 
-    xaxis: {title: '最大変化量 (diffMax)', range: [0, 200]}, 
+    // タイトルは削除（論文のキャプションと被るため）
+    // title: `特徴量分布と段差判定領域`, 
+    margin: { t: 40 }, // 上の余白を少し確保（メタデータ用）
+    xaxis: {title: '最大変化量 (diffMax)', range: [30, 100]}, 
     yaxis: {title: 'Z軸比率 (zRatio)', range: [0, 1.1]},
     shapes: [
-      // 判定エリアを赤く塗りつぶす
       {
         type: 'rect',
-        x0: FIXED_DIFF, y0: FIXED_ZRATIO,
-        x1: 200, y1: 1.1, 
-        fillcolor: 'rgba(255, 0, 0, 0.1)', // 薄い赤
-        line: { width: 0 }
+        x0: FIXED_DIFF, y0: FIXED_ZRATIO, x1: 200, y1: 1.1, 
+        fillcolor: 'rgba(255, 0, 0, 0.1)', line: { width: 0 }
       },
-      // 境界線
       { type: 'line', x0: FIXED_DIFF, y0: 0, x1: FIXED_DIFF, y1: 1.1, line: {color: '#d93025', width: 2, dash: 'dash'} },
       { type: 'line', x0: 0, y0: FIXED_ZRATIO, x1: 200, y1: FIXED_ZRATIO, line: {color: '#d93025', width: 2, dash: 'dash'} }
     ],
     annotations: [
+      // 領域ラベル（赤文字）
       {
         x: FIXED_DIFF + 5, y: 1.05, text: '段差判定領域', 
         showarrow: false, font: {color: '#d93025', size: 14, weight: 'bold'}, xanchor: 'left'
+      },
+      // 右上にN数を配置（グレーの小さめの文字）
+      {
+        xref: 'paper', yref: 'paper',
+        x: 1, y: 1.05, 
+        text: `Total N=${allData.length}`,
+        showarrow: false, font: {size: 12, color: '#666'}, xanchor: 'right', yanchor: 'bottom'
       }
     ]
   };
   Plotly.newPlot('plot', traces, layout);
 }
 
-// ② 数値付き
+// ② 数値付き（タイトル削除）
 function drawSensitivity() {
   hideMetrics();
-  const radii = []; for(let r=0; r<=15; r+=0.5) radii.push(r);
+  const radii = []; for(let r=0; r<=10; r+=0.5) radii.push(r);
   const f1s = radii.map(r => calcBinaryMetrics(r).f1);
   const textLabels = f1s.map((v, i) => (i % 2 === 0 || v === bestF1) ? v.toFixed(2) : "");
   Plotly.newPlot('plot', [
     { x: radii, y: f1s, mode: 'lines+markers+text', name: 'Step F1 Score', line: {shape: 'spline', color: '#1a73e8'}, text: textLabels, textposition: 'top center' },
     { x: [bestR], y: [bestF1], mode: 'markers', name: 'Best', marker: {color: 'red', size: 12} }
-  ], { title: '空間フィルタ半径とF値の関係', xaxis: {title: '半径 R (m)'}, yaxis: {range:[0,1.1], title: 'F値'} });
+  ], { 
+    // title: '空間フィルタ半径とF値の関係', 
+    margin: { t: 30 },
+    xaxis: {title: '半径 R (m)'}, yaxis: {range:[0,1.1], title: 'F値'} 
+  });
 }
 
-// ③ 軸日本語化・数値付き
+// ③ 軸日本語化・数値付き（タイトル削除）
 function drawComp() {
   hideMetrics();
   const m0 = calcBinaryMetrics(0), mOpt = calcBinaryMetrics(bestR);
@@ -209,7 +220,11 @@ function drawComp() {
   Plotly.newPlot('plot', [
     { x: labelsJP, y: vals0, name: 'フィルタなし', type: 'bar', text: vals0.map(v=>v.toFixed(2)), textposition: 'auto' },
     { x: labelsJP, y: valsOpt, name: `最適フィルタ (${bestR}m)`, type: 'bar', text: valsOpt.map(v=>v.toFixed(2)), textposition: 'auto' }
-  ], { title: '提案手法の導入効果', barmode: 'group', yaxis: {range:[0,1.1]} });
+  ], { 
+    // title: '提案手法の導入効果', 
+    margin: { t: 30 },
+    barmode: 'group', yaxis: {range:[0,1.1]} 
+  });
 }
 
 // ④ 論文用テーブル生成（日本語）
