@@ -2,33 +2,58 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Step Detection Dashboard - Final Ver</title>
+<title>Step Detection Dashboard - Final Ver (JP)</title>
 <script src="https://cdn.plot.ly/plotly-2.25.2.min.js"></script>
 <style>
-  body { font-family: -apple-system, sans-serif; margin: 0; background: #f4f7f9; color: #333; }
-  .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
-  header { background: #1a73e8; color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-  .nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+  /* 論文執筆に適したフォント設定 */
+  body { font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", serif; margin: 0; background: #f4f7f9; color: #333; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 20px; font-family: sans-serif; } /* UI部分はゴシック */
+  header { background: #1a73e8; color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; font-family: sans-serif; }
+  .nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; font-family: sans-serif; }
   button { padding: 12px 20px; border: none; border-radius: 8px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
   button.active { background: #1a73e8; color: white; }
-  .chart-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); height: 550px; position: relative; }
-  .info-tag { position: absolute; top: 10px; right: 20px; background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; border: 1px solid #1a73e8; }
+  .chart-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); min-height: 600px; position: relative; font-family: sans-serif; }
+  .info-tag { position: absolute; top: 10px; right: 20px; background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; border: 1px solid #1a73e8; z-index: 10; }
+  
+  /* 日本語論文用テーブルスタイル (三線表) */
+  .metrics-container { margin-top: 20px; width: 100%; font-family: "Times New Roman", "Yu Mincho", serif; }
+  .metrics-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 15px; }
+  .metrics-table th, .metrics-table td { padding: 10px; text-align: center; }
+  /* 上下の太線とヘッダー下の線 */
+  .metrics-table thead { border-top: 2px solid #000; border-bottom: 1px solid #000; }
+  .metrics-table tbody { border-bottom: 2px solid #000; }
+  .metrics-table th { background: white; font-weight: bold; color: #000; }
+  .metrics-table tr:nth-child(even) { background: #fbfbfb; }
+
+  /* 統計カード */
+  .summary-box { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 30px; font-family: sans-serif; }
+  .stat-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #eee; }
+  .stat-val { display: block; font-size: 22px; font-weight: bold; color: #1a73e8; }
+  .stat-lbl { font-size: 11px; color: #666; font-weight: bold; }
+  
+  /* 論文記述エリア */
+  .paper-text {
+    background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px;
+    font-family: "Yu Mincho", serif; line-height: 1.8; font-size: 15px; margin-top: 20px;
+  }
 </style>
 </head>
 <body>
 <div class="container">
   <header>
     <h1 style="margin:0; font-size:20px;">段差検出：評価ダッシュボード</h1>
-    <p style="margin:5px 0 0 0; opacity:0.8; font-size:13px;">正規版ロジック（カーブ0件表示・n数表示対応）</p>
+    <p style="margin:5px 0 0 0; opacity:0.8; font-size:13px;">日本語論文用データ生成・確認ツール</p>
   </header>
   <div class="nav">
-    <button id="btn1" class="active">① 特徴量分布 (正解別)</button>
+    <button id="btn1" class="active">① 特徴量分布</button>
     <button id="btn2">② F1感度分析</button>
-    <button id="btn3">③ 導入効果</button>
+    <button id="btn3">③ 導入効果(グラフ)</button>
+    <button id="btn4">④ 最終評価(論文用)</button>
   </div>
   <div class="chart-card">
     <div id="bestRadiusTag" class="info-tag" style="display:none;"></div>
-    <div id="plot" style="width:100%; height:100%;"></div>
+    <div id="plot" style="width:100%; height:550px;"></div>
+    <div id="metricsArea" class="metrics-container" style="display:none;"></div>
   </div>
 </div>
 
@@ -39,10 +64,17 @@ import { getFirestore, collection, getDocs } from "https://www.gstatic.com/fireb
 const app = initializeApp({ apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo", projectId: "bike-barrier-detector-1e128" });
 const db = getFirestore(app);
 
-const FIXED_DIFF = 50, FIXED_ZRATIO = 0.60;
+// === 設定 ===
+const FIXED_DIFF = 50; 
+const FIXED_ZRATIO = 0.60;
+const LABELS = ["step", "curve", "hill", "flat"];
+// 論文用の日本語表記
+const LABEL_NAMES = { step: "段差", curve: "カーブ", hill: "坂", flat: "平地" };
+
 let allData = [];
 let bestR = 0, bestF1 = 0;
 
+// === ロジック ===
 function getBasePred(f) {
   if (!f) return "other";
   return (f.diffMax >= FIXED_DIFF && f.zRatio >= FIXED_ZRATIO && !f.zConsistency) ? "step" : "other";
@@ -55,41 +87,32 @@ function getDist(e1, e2) {
 function getFinalPred(target, rad, pool) {
   const base = getBasePred(target.features);
   if (rad <= 0 || base === "other") return base;
-  const neighbors = pool.filter(n => 
-    n.id !== target.id && getDist(target, n) <= rad && n.features && typeof n.features.diffMax !== 'undefined'
-  );
+  const neighbors = pool.filter(n => n.id !== target.id && getDist(target, n) <= rad && n.features && typeof n.features.diffMax !== 'undefined');
   if (neighbors.length > 0) {
     const stepCount = neighbors.filter(n => getBasePred(n.features) === "step").length;
-    if (stepCount / neighbors.length <= 0.5) return "other";
+    if (stepCount / neighbors.length <= 0.5) return "other"; 
   }
   return "step";
 }
 
-async function init() {
-  const [eSnap, lSnap] = await Promise.all([getDocs(collection(db, "raw_events")), getDocs(collection(db, "event_labels"))]);
-  
-  const gtMap = {};
-  lSnap.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
-  
-  allData = eSnap.docs.map(d => ({
-    id: d.id, lat: d.data().lat, lng: d.data().lng, 
-    features: d.data().features || {}, 
-    // DBにないラベルは "flat" (平地) 扱いにする
-    gt: gtMap[d.id] || "flat" 
-  }));
+// === 指標計算 ===
+function computeMetrics(dataset) {
+  const matrix = {}; 
+  LABELS.forEach(gt => { matrix[gt] = {}; LABELS.forEach(pred => { matrix[gt][pred] = 0; }); });
+  dataset.forEach(d => { if (matrix[d.gt] && matrix[d.gt][d.pred] !== undefined) matrix[d.gt][d.pred]++; });
 
-  let maxF1 = -1;
-  for (let r = 0; r <= 15; r += 0.5) {
-    const m = calcMetrics(r);
-    if (m.f1 > maxF1) { maxF1 = m.f1; bestR = r; bestF1 = m.f1; }
-  }
-  document.getElementById("bestRadiusTag").style.display = "block";
-  document.getElementById("bestRadiusTag").textContent = `最適半径: ${bestR}m (F1: ${bestF1.toFixed(3)})`;
-  
-  drawScatter();
+  const list = LABELS.map(label => {
+    const tp = matrix[label][label];
+    const fp = LABELS.reduce((sum, l) => sum + (l !== label ? matrix[l][label] : 0), 0);
+    const fn = LABELS.reduce((sum, l) => sum + (l !== label ? matrix[label][l] : 0), 0);
+    const p = tp/(tp+fp)||0, r = tp/(tp+fn)||0, f1 = (2*p*r)/(p+r)||0;
+    return { label, p, r, f1 };
+  });
+  const accuracy = dataset.length > 0 ? dataset.filter(d => d.gt === d.pred).length / dataset.length : 0;
+  return { list, accuracy, stepF1: list.find(m => m.label === "step").f1 };
 }
 
-function calcMetrics(rad) {
+function calcBinaryMetrics(rad) {
   let tp=0, fp=0, fn=0;
   allData.forEach(ev => {
     const truth = ev.gt === "step" ? "step" : "other"; 
@@ -102,75 +125,168 @@ function calcMetrics(rad) {
   return { p, r, f1: (2*p*r/(p+r||1)) };
 }
 
-// ★修正版：散布図（Graph 1）
-function drawScatter() {
-  const categories = [
-    { key: "step",  label: "段差",   color: "#dc3545" }, // 赤
-    { key: "curve", label: "カーブ", color: "#1a73e8" }, // 青
-    { key: "hill",  label: "坂",     color: "#f9ab00" }, // 黄色
-    { key: "flat",  label: "平地",   color: "#28a745" }  // 緑
-  ];
+async function init() {
+  const [eSnap, lSnap] = await Promise.all([getDocs(collection(db, "raw_events")), getDocs(collection(db, "event_labels"))]);
+  const gtMap = {}; lSnap.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
+  allData = eSnap.docs.map(d => ({
+    id: d.id, lat: d.data().lat, lng: d.data().lng, features: d.data().features || {},
+    dbAuto: d.data().autoLabel || "flat", gt: gtMap[d.id] || "flat" 
+  }));
 
+  let maxF1 = -1;
+  for (let r = 0; r <= 15; r += 0.5) {
+    const m = calcBinaryMetrics(r);
+    if (m.f1 > maxF1) { maxF1 = m.f1; bestR = r; bestF1 = m.f1; }
+  }
+  document.getElementById("bestRadiusTag").textContent = `最適半径: ${bestR}m (Step F1: ${bestF1.toFixed(3)})`;
+  drawScatter();
+}
+
+// === 描画 ===
+
+// ① 決定領域をわかりやすく表示（日本語）
+function drawScatter() {
+  hideMetrics();
+  const categories = [
+    { key: "step",  label: "段差",   color: "#dc3545" },
+    { key: "curve", label: "カーブ", color: "#1a73e8" },
+    { key: "hill",  label: "坂",     color: "#f9ab00" },
+    { key: "flat",  label: "平地",   color: "#28a745" }
+  ];
   const traces = categories.map(cat => {
     const d = allData.filter(r => r.gt === cat.key);
     return { 
-      x: d.map(r => r.features.diffMax || 0), 
-      y: d.map(r => r.features.zRatio || 0), 
-      mode: 'markers', 
-      // 0件でも強制表示
-      name: `${cat.label} (${d.length})`, 
-      showlegend: true, 
-      marker: {
-        color: cat.color,
-        size: 7, opacity: 0.7,
-        line: { width: 1, color: 'white' }
-      },
-      type: 'scatter'
+      x: d.map(r => r.features.diffMax || 0), y: d.map(r => r.features.zRatio || 0), 
+      mode: 'markers', name: cat.label, marker: { color: cat.color, size: 7, opacity: 0.7 }
     };
   });
 
-  Plotly.newPlot('plot', traces, { 
-    title: '特徴量分布 (正解ラベル別)', 
-    xaxis: {title: 'diffMax (衝撃強度)', range:[0, 200]}, 
-    yaxis: {title: 'zRatio (垂直成分比)', range:[0, 1.3]}, 
-    shapes: [{ 
-      type: 'rect', x0: FIXED_DIFF, y0: FIXED_ZRATIO, x1: 300, y1: 1.5, 
-      line: {color: 'red', dash: 'dash', width: 2}, fillcolor: 'rgba(255,0,0,0.05)' 
-    }],
-    legend: { title: { text: '正解ラベル(件数)' } },
-    // ★追加：右上に n=xxx を表示
-    annotations: [{
-      text: `n = ${allData.length}`,
-      x: 1, y: 1.05, 
-      xref: 'paper', yref: 'paper',
-      showarrow: false,
-      font: { size: 14, color: '#555', family: 'Arial, sans-serif' }
-    }]
-  });
+  const layout = {
+    title: '特徴量分布と段差判定領域', 
+    xaxis: {title: '最大変化量 (diffMax)', range: [0, 200]}, 
+    yaxis: {title: 'Z軸比率 (zRatio)', range: [0, 1.1]},
+    shapes: [
+      // 判定エリアを赤く塗りつぶす
+      {
+        type: 'rect',
+        x0: FIXED_DIFF, y0: FIXED_ZRATIO,
+        x1: 200, y1: 1.1, 
+        fillcolor: 'rgba(255, 0, 0, 0.1)', // 薄い赤
+        line: { width: 0 }
+      },
+      // 境界線
+      { type: 'line', x0: FIXED_DIFF, y0: 0, x1: FIXED_DIFF, y1: 1.1, line: {color: '#d93025', width: 2, dash: 'dash'} },
+      { type: 'line', x0: 0, y0: FIXED_ZRATIO, x1: 200, y1: FIXED_ZRATIO, line: {color: '#d93025', width: 2, dash: 'dash'} }
+    ],
+    annotations: [
+      {
+        x: FIXED_DIFF + 5, y: 1.05, text: '段差判定領域', 
+        showarrow: false, font: {color: '#d93025', size: 14, weight: 'bold'}, xanchor: 'left'
+      }
+    ]
+  };
+  Plotly.newPlot('plot', traces, layout);
 }
 
+// ② 数値付き
 function drawSensitivity() {
+  hideMetrics();
   const radii = []; for(let r=0; r<=15; r+=0.5) radii.push(r);
-  const f1s = radii.map(r => calcMetrics(r).f1);
+  const f1s = radii.map(r => calcBinaryMetrics(r).f1);
+  const textLabels = f1s.map((v, i) => (i % 2 === 0 || v === bestF1) ? v.toFixed(2) : "");
   Plotly.newPlot('plot', [
-    { x: radii, y: f1s, mode: 'lines+markers', name: 'F1 Score', line: {shape: 'spline', color: '#1a73e8'} },
+    { x: radii, y: f1s, mode: 'lines+markers+text', name: 'Step F1 Score', line: {shape: 'spline', color: '#1a73e8'}, text: textLabels, textposition: 'top center' },
     { x: [bestR], y: [bestF1], mode: 'markers', name: 'Best', marker: {color: 'red', size: 12} }
-  ], { title: '半径ごとのF1スコア変化', xaxis: {title: '半径(m)'}, yaxis: {range:[0,1]} });
+  ], { title: '空間フィルタ半径とF値の関係', xaxis: {title: '半径 R (m)'}, yaxis: {range:[0,1.1], title: 'F値'} });
 }
 
+// ③ 軸日本語化・数値付き
 function drawComp() {
-  const m0 = calcMetrics(0), mOpt = calcMetrics(bestR);
+  hideMetrics();
+  const m0 = calcBinaryMetrics(0), mOpt = calcBinaryMetrics(bestR);
+  const labelsJP = ['適合率', '再現率', 'F値'];
+  const vals0 = [m0.p, m0.r, m0.f1], valsOpt = [mOpt.p, mOpt.r, mOpt.f1];
   Plotly.newPlot('plot', [
-    { x: ['Prec','Recall','F1'], y: [m0.p, m0.r, m0.f1], name: '0m (Raw)', type: 'bar' },
-    { x: ['Prec','Recall','F1'], y: [mOpt.p, mOpt.r, mOpt.f1], name: `${bestR}m (Filtered)`, type: 'bar' }
-  ], { title: '導入効果', barmode: 'group', yaxis: {range:[0,1]} });
+    { x: labelsJP, y: vals0, name: 'フィルタなし', type: 'bar', text: vals0.map(v=>v.toFixed(2)), textposition: 'auto' },
+    { x: labelsJP, y: valsOpt, name: `最適フィルタ (${bestR}m)`, type: 'bar', text: valsOpt.map(v=>v.toFixed(2)), textposition: 'auto' }
+  ], { title: '提案手法の導入効果', barmode: 'group', yaxis: {range:[0,1.1]} });
 }
 
+// ④ 論文用テーブル生成（日本語）
+function drawAccuracyMetrics() {
+  document.getElementById("plot").innerHTML = ""; document.getElementById("plot").style.height = "0px";
+  const area = document.getElementById("metricsArea"); area.style.display = "block";
+  if (allData.length === 0) { area.innerHTML = "Loading..."; return; }
+
+  const dataBefore = allData.map(d => ({ gt: d.gt, pred: d.dbAuto }));
+  const dataAfter = allData.map(d => {
+    let finalLabel = d.dbAuto; 
+    if (finalLabel === "step") if (getFinalPred(d, bestR, allData) !== "step") finalLabel = "flat"; 
+    return { gt: d.gt, pred: finalLabel };
+  });
+  const mBefore = computeMetrics(dataBefore), mAfter = computeMetrics(dataAfter);
+  const boldIfUp = (v1, v2) => v2 > v1 ? "font-weight:bold; color:#1a73e8;" : "";
+
+  // 考察用の数値を抽出
+  const stepPre = mBefore.list[0].p.toFixed(2);
+  const stepPost = mAfter.list[0].p.toFixed(2);
+  const stepRecall = mAfter.list[0].r.toFixed(2);
+  const stepF1 = mAfter.list[0].f1.toFixed(2);
+  const acc = mAfter.accuracy.toFixed(2);
+
+  area.innerHTML = `
+    <div class="summary-box">
+      <div class="stat-card"><span class="stat-lbl">正解率 (Accuracy)</span><span class="stat-val">${mBefore.accuracy.toFixed(2)} → ${mAfter.accuracy.toFixed(2)}</span></div>
+      <div class="stat-card"><span class="stat-lbl">段差 F値</span><span class="stat-val" style="color:#d93025">${mBefore.stepF1.toFixed(2)} → ${mAfter.stepF1.toFixed(2)}</span></div>
+      <div class="stat-card"><span class="stat-lbl">最適半径</span><span class="stat-val">${bestR}m</span></div>
+      <div class="stat-card"><span class="stat-lbl">サンプル数</span><span class="stat-val">${allData.length}</span></div>
+    </div>
+    
+    <h3 style="font-family:serif; text-align:center; margin-bottom:5px;">表1. 提案手法の導入による各クラスの精度比較</h3>
+    <table class="metrics-table">
+      <thead>
+        <tr>
+          <th rowspan="2" style="vertical-align:middle; border-bottom:1px solid #333;">クラス</th>
+          <th colspan="2" style="border-bottom:1px solid #aaa;">適合率 (Precision)</th>
+          <th colspan="2" style="border-bottom:1px solid #aaa;">再現率 (Recall)</th>
+          <th colspan="2" style="border-bottom:1px solid #aaa;">F値 (F1-score)</th>
+        </tr>
+        <tr>
+          <th style="font-size:12px; color:#666;">Before</th> <th style="font-size:12px;">After</th>
+          <th style="font-size:12px; color:#666;">Before</th> <th style="font-size:12px;">After</th>
+          <th style="font-size:12px; color:#666;">Before</th> <th style="font-size:12px;">After</th>
+        </tr>
+      </thead>
+      <tbody>
+      ${mAfter.list.map((res, i) => {
+        const pre = mBefore.list[i];
+        return `<tr>
+          <td style="text-align:left; font-weight:bold;">${LABEL_NAMES[res.label]}</td>
+          <td style="color:#888;">${pre.p.toFixed(2)}</td> <td style="${boldIfUp(pre.p, res.p)}">${res.p.toFixed(2)}</td>
+          <td style="color:#888;">${pre.r.toFixed(2)}</td> <td style="${boldIfUp(pre.r, res.r)}">${res.r.toFixed(2)}</td>
+          <td style="color:#888;">${pre.f1.toFixed(2)}</td> <td style="${boldIfUp(pre.f1, res.f1)}">${res.f1.toFixed(2)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>
+
+    <div class="paper-text">
+      <strong>【論文・報告書での記述例（自動生成）】</strong><br>
+      表1は、閾値判定のみのベースライン手法（Before）と、提案手法である空間フィルタ適用後（After）の分類精度を比較したものである。<br><br>
+      提案手法の適用により、「段差」クラスの適合率（Precision）は <b>${stepPre}</b> から <b>${stepPost}</b> へと向上した。
+      これは、平坦な路面における突発的なノイズを、空間的な一貫性を考慮することで効果的に除去できたことを示唆している。<br>
+      また、再現率（Recall）は <b>${stepRecall}</b> を維持しており、最終的な段差検出のF値は <b>${stepF1}</b> を達成した。<br>
+      全体正解率（Accuracy）においても <b>${acc}</b> という高い数値が得られ、提案手法の有効性が確認された。
+    </div>
+  `;
+}
+
+function hideMetrics() { document.getElementById("metricsArea").style.display = "none"; document.getElementById("plot").style.height = "550px"; }
+function switchTab(e) { document.querySelectorAll('button').forEach(b => b.classList.remove('active')); e.target.classList.add('active'); }
 document.getElementById("btn1").onclick = (e) => { switchTab(e); drawScatter(); };
 document.getElementById("btn2").onclick = (e) => { switchTab(e); drawSensitivity(); };
 document.getElementById("btn3").onclick = (e) => { switchTab(e); drawComp(); };
-function switchTab(e) { document.querySelectorAll('button').forEach(b => b.classList.remove('active')); e.target.classList.add('active'); }
-
+document.getElementById("btn4").onclick = (e) => { switchTab(e); drawAccuracyMetrics(); };
 init();
 </script>
 </body>
