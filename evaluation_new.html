@@ -219,8 +219,8 @@ function drawComp() {
   const valsOpt = [mOpt.p, mOpt.r, mOpt.f1];
   
   Plotly.newPlot('plot', [
-    { x: labelsJP, y: vals0, name: 'フィルタなし (Before)', type: 'bar', text: vals0.map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#ee7800 '} },
-    { x: labelsJP, y: valsOpt, name: `提案手法 (After)`, type: 'bar', text: valsOpt.map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#1a73e8'} }
+    { x: labelsJP, y: vals0, name: 'フィルタなし', type: 'bar', text: vals0.map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#ee7800 '} },
+    { x: labelsJP, y: valsOpt, name: `フィルタあり`, type: 'bar', text: valsOpt.map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#1a73e8'} }
   ], { 
     margin: { t: 30 }, 
     barmode: 'group', 
