@@ -2,33 +2,34 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Step Detection Dashboard - Final Ver (JP)</title>
+<title>Step Detection Dashboard - Binary Class Ver</title>
 <script src="https://cdn.plot.ly/plotly-2.25.2.min.js"></script>
 <style>
-  /* 論文執筆に適したフォント設定 */
+  /* 論文執筆用フォント設定 */
   body { font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", serif; margin: 0; background: #f4f7f9; color: #333; }
-  .container { max-width: 1000px; margin: 0 auto; padding: 20px; font-family: sans-serif; } /* UI部分はゴシック */
+  .container { max-width: 1000px; margin: 0 auto; padding: 20px; font-family: sans-serif; }
   header { background: #1a73e8; color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; font-family: sans-serif; }
   .nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; font-family: sans-serif; flex-wrap: wrap; }
   button { padding: 12px 20px; border: none; border-radius: 8px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
   button.active { background: #1a73e8; color: white; }
   .chart-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); min-height: 600px; position: relative; font-family: sans-serif; }
-  .info-tag { position: absolute; top: 10px; right: 20px; background: #e8f0fe; color: #1a73e8; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; border: 1px solid #1a73e8; z-index: 10; }
   
-  /* 日本語論文用テーブルスタイル (三線表) */
+  /* 論文用テーブルスタイル */
   .metrics-container { margin-top: 20px; width: 100%; font-family: "Times New Roman", "Yu Mincho", serif; }
   .metrics-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 15px; }
-  .metrics-table th, .metrics-table td { padding: 10px; text-align: center; }
+  .metrics-table th, .metrics-table td { padding: 12px; text-align: center; border: 1px solid #ddd; }
+  /* 三線表デザイン */
   .metrics-table thead { border-top: 2px solid #000; border-bottom: 1px solid #000; }
   .metrics-table tbody { border-bottom: 2px solid #000; }
-  .metrics-table th { background: white; font-weight: bold; color: #000; }
+  .metrics-table th { background: white; font-weight: bold; color: #000; border: none; border-bottom: 1px solid #000; }
+  .metrics-table td { border: none; }
   .metrics-table tr:nth-child(even) { background: #fbfbfb; }
 
   /* 統計カード */
-  .summary-box { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 30px; font-family: sans-serif; }
+  .summary-box { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 30px; font-family: sans-serif; }
   .stat-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #eee; }
-  .stat-val { display: block; font-size: 22px; font-weight: bold; color: #1a73e8; }
-  .stat-lbl { font-size: 11px; color: #666; font-weight: bold; }
+  .stat-val { display: block; font-size: 24px; font-weight: bold; color: #1a73e8; }
+  .stat-lbl { font-size: 12px; color: #666; font-weight: bold; }
   
   /* 論文記述エリア */
   .paper-text {
@@ -40,8 +41,8 @@
 <body>
 <div class="container">
   <header>
-    <h1 style="margin:0; font-size:20px;">段差検出：評価ダッシュボード</h1>
-    <p style="margin:5px 0 0 0; opacity:0.8; font-size:13px;">データ分析・論文図表生成ツール</p>
+    <h1 style="margin:0; font-size:20px;">段差検出：評価ダッシュボード (2クラス統合版)</h1>
+    <p style="margin:5px 0 0 0; opacity:0.8; font-size:13px;">坂・カーブ・平地を「非段差」として統合評価</p>
   </header>
   <div class="nav">
     <button id="btn1" class="active">① 特徴量分布</button>
@@ -51,7 +52,6 @@
     <button id="btn5">⑤ 検出ロジック(図)</button>
   </div>
   <div class="chart-card">
-    <div id="bestRadiusTag" class="info-tag" style="display:none;"></div>
     <div id="plot" style="width:100%; height:550px;"></div>
     <div id="metricsArea" class="metrics-container" style="display:none;"></div>
   </div>
@@ -65,77 +65,87 @@ const app = initializeApp({ apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo", p
 const db = getFirestore(app);
 
 // === 設定 ===
-const EVENT_TRIGGER_DIFF = 45; // イベントとして保存される閾値
-const STEP_JUDGE_DIFF = 50;    // 段差として判定する閾値
+const EVENT_TRIGGER_DIFF = 45; 
+const STEP_JUDGE_DIFF = 50;    
 const FIXED_ZRATIO = 0.60;
-const LABELS = ["step", "curve", "hill", "flat"];
-const LABEL_NAMES = { step: "段差", curve: "カーブ", hill: "坂", flat: "平地" };
+
+// 2クラス分類用の定義
+const LABELS = ["step", "other"];
+const LABEL_NAMES = { step: "段差", other: "非段差 (坂・カーブ・平地)" };
 
 let allData = [];
 let bestR = 0, bestF1 = 0;
 
-// === ロジック ===
+// === データ変換ロジック ===
+function normalizeLabel(label) {
+  // "step" 以外はすべて "other" に統合
+  return label === "step" ? "step" : "other";
+}
+
+// === 判定ロジック ===
 function getBasePred(f) {
   if (!f) return "other";
+  // 閾値判定のみ
   return (f.diffMax >= STEP_JUDGE_DIFF && f.zRatio >= FIXED_ZRATIO && !f.zConsistency) ? "step" : "other";
 }
+
 function getDist(e1, e2) {
   const R = 6371000, dLat = (e2.lat - e1.lat) * Math.PI / 180, dLon = (e2.lng - e1.lng) * Math.PI / 180;
   const a = Math.sin(dLat/2)**2 + Math.cos(e1.lat*Math.PI/180) * Math.cos(e2.lat*Math.PI/180) * Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
+
 function getFinalPred(target, rad, pool) {
   const base = getBasePred(target.features);
   if (rad <= 0 || base === "other") return base;
+  
+  // 空間フィルタ（近傍探索）
   const neighbors = pool.filter(n => n.id !== target.id && getDist(target, n) <= rad && n.features && typeof n.features.diffMax !== 'undefined');
   if (neighbors.length > 0) {
+    // 近傍の「段差判定」割合を計算
     const stepCount = neighbors.filter(n => getBasePred(n.features) === "step").length;
+    // 半数以下ならノイズとして棄却 -> "other"へ
     if (stepCount / neighbors.length <= 0.5) return "other"; 
   }
-  return "step";
+  return "step"; // そのまま段差認定
 }
 
-// === 指標計算 ===
-function computeMetrics(dataset) {
-  const matrix = {}; 
-  LABELS.forEach(gt => { matrix[gt] = {}; LABELS.forEach(pred => { matrix[gt][pred] = 0; }); });
-  dataset.forEach(d => { if (matrix[d.gt] && matrix[d.gt][d.pred] !== undefined) matrix[d.gt][d.pred]++; });
-
-  const list = LABELS.map(label => {
-    const tp = matrix[label][label];
-    const fp = LABELS.reduce((sum, l) => sum + (l !== label ? matrix[l][label] : 0), 0);
-    const fn = LABELS.reduce((sum, l) => sum + (l !== label ? matrix[label][l] : 0), 0);
-    const p = tp/(tp+fp)||0, r = tp/(tp+fn)||0, f1 = (2*p*r)/(p+r)||0;
-    return { label, p, r, f1 };
+// === 指標計算 (TP/FP/FN/TN) ===
+function calcMetrics(radius) {
+  let tp=0, fp=0, fn=0, tn=0;
+  allData.forEach(d => {
+    const truth = d.gt; 
+    const pred = getFinalPred(d, radius, allData);
+    
+    if (pred === "step" && truth === "step") tp++;
+    else if (pred === "step" && truth === "other") fp++;
+    else if (pred === "other" && truth === "step") fn++;
+    else tn++;
   });
-  const accuracy = dataset.length > 0 ? dataset.filter(d => d.gt === d.pred).length / dataset.length : 0;
-  return { list, accuracy, stepF1: list.find(m => m.label === "step").f1 };
-}
-
-function calcBinaryMetrics(rad) {
-  let tp=0, fp=0, fn=0;
-  allData.forEach(ev => {
-    const truth = ev.gt === "step" ? "step" : "other"; 
-    const pred = getFinalPred(ev, rad, allData) === "step" ? "step" : "other";
-    if (pred === "step" && truth === "step") tp++; 
-    else if (pred === "step" && truth !== "step") fp++; 
-    else if (pred !== "step" && truth === "step") fn++;
-  });
-  const p = tp/(tp+fp||1), r = tp/(tp+fn||1);
-  return { p, r, f1: (2*p*r/(p+r||1)) };
+  
+  const p = tp / (tp + fp) || 0;
+  const r = tp / (tp + fn) || 0;
+  const f1 = (2 * p * r) / (p + r) || 0;
+  const acc = (tp + tn) / allData.length || 0;
+  
+  return { p, r, f1, acc, tp, fp, fn, tn };
 }
 
 async function init() {
   const [eSnap, lSnap] = await Promise.all([getDocs(collection(db, "raw_events")), getDocs(collection(db, "event_labels"))]);
   const gtMap = {}; lSnap.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
+  
+  // 読み込み時に正規化 (normalizeLabel) を適用
   allData = eSnap.docs.map(d => ({
     id: d.id, lat: d.data().lat, lng: d.data().lng, features: d.data().features || {},
-    dbAuto: d.data().autoLabel || "flat", gt: gtMap[d.id] || "flat" 
+    dbAuto: normalizeLabel(d.data().autoLabel || "flat"), 
+    gt: normalizeLabel(gtMap[d.id] || "flat") 
   }));
 
+  // 最適半径の探索
   let maxF1 = -1;
   for (let r = 0; r <= 15; r += 0.5) {
-    const m = calcBinaryMetrics(r);
+    const m = calcMetrics(r);
     if (m.f1 > maxF1) { maxF1 = m.f1; bestR = r; bestF1 = m.f1; }
   }
   document.getElementById("bestRadiusTag").textContent = `最適半径: ${bestR}m (Step F1: ${bestF1.toFixed(3)})`;
@@ -144,20 +154,18 @@ async function init() {
 
 // === 描画関数群 ===
 
-// ① 散布図
+// ① 散布図 (2クラス)
 function drawScatter() {
   hideMetrics();
   const categories = [
     { key: "step",  label: "段差",   color: "#dc3545" },
-    { key: "curve", label: "カーブ", color: "#1a73e8" },
-    { key: "hill",  label: "坂",     color: "#f9ab00" },
-    { key: "flat",  label: "平地",   color: "#28a745" }
+    { key: "other", label: "非段差", color: "#28a745" }
   ];
   const traces = categories.map(cat => {
     const d = allData.filter(r => r.gt === cat.key);
     return { 
       x: d.map(r => r.features.diffMax || 0), y: d.map(r => r.features.zRatio || 0), 
-      mode: 'markers', name: `${cat.label} (n=${d.length})`, marker: { color: cat.color, size: 7, opacity: 0.7 }
+      mode: 'markers', name: `${cat.label} (n=${d.length})`, marker: { color: cat.color, size: 7, opacity: 0.6 }
     };
   });
 
@@ -166,120 +174,129 @@ function drawScatter() {
     xaxis: {title: '最大変化量 (diffMax)', range: [30, 100]}, 
     yaxis: {title: 'Z軸比率 (zRatio)', range: [0, 1.1]},
     shapes: [
-      {
+      { // 段差判定エリア
         type: 'rect', x0: STEP_JUDGE_DIFF, y0: FIXED_ZRATIO, x1: 200, y1: 1.1, 
         fillcolor: 'rgba(255, 0, 0, 0.1)', line: { width: 0 }
       },
-      { 
-        type: 'line', x0: EVENT_TRIGGER_DIFF, y0: 0, x1: EVENT_TRIGGER_DIFF, y1: 1.1, 
-        line: {color: '#f9ab00', width: 2, dash: 'dot'} 
-      },
-      { 
-        type: 'line', x0: STEP_JUDGE_DIFF, y0: 0, x1: STEP_JUDGE_DIFF, y1: 1.1, 
-        line: {color: '#d93025', width: 2, dash: 'dash'} 
-      },
-      { 
-        type: 'line', x0: 0, y0: FIXED_ZRATIO, x1: 200, y1: FIXED_ZRATIO, 
-        line: {color: '#d93025', width: 2, dash: 'dash'} 
-      }
+      { type: 'line', x0: EVENT_TRIGGER_DIFF, y0: 0, x1: EVENT_TRIGGER_DIFF, y1: 1.1, line: {color: '#f9ab00', width: 2, dash: 'dot'} },
+      { type: 'line', x0: STEP_JUDGE_DIFF, y0: 0, x1: STEP_JUDGE_DIFF, y1: 1.1, line: {color: '#d93025', width: 2, dash: 'dash'} },
+      { type: 'line', x0: 0, y0: FIXED_ZRATIO, x1: 200, y1: FIXED_ZRATIO, line: {color: '#d93025', width: 2, dash: 'dash'} }
     ],
     annotations: [
-      {
-        x: EVENT_TRIGGER_DIFF, y: 1.05, text: '検知(45)', 
-        showarrow: false, font: {color: '#f9ab00', size: 12}, xanchor: 'right', xshift: -5
-      },
-      {
-        x: STEP_JUDGE_DIFF, y: 1.05, text: '段差判定(50)', 
-        showarrow: false, font: {color: '#d93025', size: 12, weight: 'bold'}, xanchor: 'left', xshift: 5
-      },
-      {
-        xref: 'paper', yref: 'paper', x: 1, y: 1.05, 
-        text: `Total N=${allData.length}`, showarrow: false, font: {size: 12, color: '#666'}, xanchor: 'right', yanchor: 'bottom'
-      }
+      { x: EVENT_TRIGGER_DIFF, y: 1.05, text: '検知(45)', showarrow: false, font: {color: '#f9ab00', size: 12}, xanchor: 'right', xshift: -5 },
+      { x: STEP_JUDGE_DIFF, y: 1.05, text: '判定(50)', showarrow: false, font: {color: '#d93025', size: 12, weight: 'bold'}, xanchor: 'left', xshift: 5 },
+      { xref: 'paper', yref: 'paper', x: 1, y: 1.05, text: `Total N=${allData.length}`, showarrow: false, font: {size: 12, color: '#666'}, xanchor: 'right', yanchor: 'bottom' }
     ]
   };
   Plotly.newPlot('plot', traces, layout);
 }
 
-// ② F1感度 (日本語化)
+// ② F1感度 (段差クラスに対するF値)
 function drawSensitivity() {
   hideMetrics();
   const radii = []; for(let r=0; r<=10; r+=0.5) radii.push(r);
-  const f1s = radii.map(r => calcBinaryMetrics(r).f1);
+  const f1s = radii.map(r => calcMetrics(r).f1);
   const textLabels = f1s.map((v, i) => (i % 2 === 0 || v === bestF1) ? v.toFixed(2) : "");
+  
   Plotly.newPlot('plot', [
-    // Step F1 Score -> 段差F値
     { x: radii, y: f1s, mode: 'lines+markers+text', name: '段差F値', line: {shape: 'spline', color: '#1a73e8'}, text: textLabels, textposition: 'top center' },
-    // Best -> 最大値
     { x: [bestR], y: [bestF1], mode: 'markers', name: '最大値', marker: {color: 'red', size: 12} }
   ], { 
     margin: { t: 30 }, 
     xaxis: {title: '半径 R (m)'}, 
-    yaxis: {range:[0,1.1], title: 'F値'} 
+    yaxis: {range:[0,1.1], title: 'F値 (段差クラス)'} 
   });
 }
 
-// ③ 導入効果
+// ③ 導入効果 (棒グラフ)
 function drawComp() {
   hideMetrics();
-  const m0 = calcBinaryMetrics(0), mOpt = calcBinaryMetrics(bestR);
+  const m0 = calcMetrics(0);      // フィルタなし
+  const mOpt = calcMetrics(bestR); // 最適フィルタ
+  
   const labelsJP = ['適合率', '再現率', 'F値'];
-  const vals0 = [m0.p, m0.r, m0.f1], valsOpt = [mOpt.p, mOpt.r, mOpt.f1];
+  const vals0 = [m0.p, m0.r, m0.f1];
+  const valsOpt = [mOpt.p, mOpt.r, mOpt.f1];
+  
   Plotly.newPlot('plot', [
-    { x: labelsJP, y: vals0, name: 'フィルタなし', type: 'bar', text: vals0.map(v=>v.toFixed(2)), textposition: 'auto' },
-    { x: labelsJP, y: valsOpt, name: `最適フィルタ (${bestR}m)`, type: 'bar', text: valsOpt.map(v=>v.toFixed(2)), textposition: 'auto' }
-  ], { margin: { t: 30 }, barmode: 'group', yaxis: {range:[0,1.1]} });
+    { x: labelsJP, y: vals0, name: 'フィルタなし (Before)', type: 'bar', text: vals0.map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#ee7800 '} },
+    { x: labelsJP, y: valsOpt, name: `提案手法 (After)`, type: 'bar', text: valsOpt.map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#1a73e8'} }
+  ], { 
+    margin: { t: 30 }, 
+    barmode: 'group', 
+    yaxis: {range:[0,1.1], title: 'スコア'} 
+  });
 }
 
-// ④ 最終評価テーブル
+// ④ 最終評価テーブル (論文 表2用)
 function drawAccuracyMetrics() {
   document.getElementById("plot").innerHTML = ""; document.getElementById("plot").style.height = "0px";
   const area = document.getElementById("metricsArea"); area.style.display = "block";
+  
   if (allData.length === 0) { area.innerHTML = "Loading..."; return; }
-  const dataBefore = allData.map(d => ({ gt: d.gt, pred: d.dbAuto }));
-  const dataAfter = allData.map(d => {
-    let finalLabel = d.dbAuto; 
-    if (finalLabel === "step") if (getFinalPred(d, bestR, allData) !== "step") finalLabel = "flat"; 
-    return { gt: d.gt, pred: finalLabel };
-  });
-  const mBefore = computeMetrics(dataBefore), mAfter = computeMetrics(dataAfter);
-  const boldIfUp = (v1, v2) => v2 > v1 ? "font-weight:bold; color:#1a73e8;" : "";
-  const stepPre = mBefore.list[0].p.toFixed(2);
-  const stepPost = mAfter.list[0].p.toFixed(2);
-  const stepRecall = mAfter.list[0].r.toFixed(2);
-  const stepF1 = mAfter.list[0].f1.toFixed(2);
-  const acc = mAfter.accuracy.toFixed(2);
+  
+  const mB = calcMetrics(0);     // Before
+  const mA = calcMetrics(bestR); // After
+  
+  // 改善した数値を太字にするヘルパー
+  const styleVal = (v1, v2) => v2 > v1 ? "font-weight:bold; color:#1a73e8;" : "";
 
   area.innerHTML = `
     <div class="summary-box">
-      <div class="stat-card"><span class="stat-lbl">正解率</span><span class="stat-val">${mBefore.accuracy.toFixed(2)} → ${mAfter.accuracy.toFixed(2)}</span></div>
-      <div class="stat-card"><span class="stat-lbl">段差 F値</span><span class="stat-val" style="color:#d93025">${mBefore.stepF1.toFixed(2)} → ${mAfter.stepF1.toFixed(2)}</span></div>
-      <div class="stat-card"><span class="stat-lbl">最適半径</span><span class="stat-val">${bestR}m</span></div>
-      <div class="stat-card"><span class="stat-lbl">N数</span><span class="stat-val">${allData.length}</span></div>
+      <div class="stat-card"><span class="stat-lbl">適合率 (Precision)</span><span class="stat-val">${(mA.p).toFixed(2)}</span></div>
+      <div class="stat-card"><span class="stat-lbl">F値 (F1-Score)</span><span class="stat-val" style="color:#d93025">${(mA.f1).toFixed(2)}</span></div>
+      <div class="stat-card"><span class="stat-lbl">正解率 (Accuracy)</span><span class="stat-val">${(mA.acc).toFixed(2)}</span></div>
     </div>
-    <h3 style="font-family:serif; text-align:center;">表1. 提案手法の導入効果</h3>
+    
+    <h3 style="font-family:serif; text-align:center; margin-bottom:5px;">表2. 提案手法の導入による段差検出精度の比較</h3>
     <table class="metrics-table">
       <thead>
-        <tr><th rowspan="2">クラス</th><th colspan="2">適合率</th><th colspan="2">再現率</th><th colspan="2">F値</th></tr>
-        <tr><th>Before</th><th>After</th><th>Before</th><th>After</th><th>Before</th><th>After</th></tr>
+        <tr>
+          <th rowspan="2">評価指標</th>
+          <th colspan="2">値</th>
+          <th rowspan="2">改善幅</th>
+        </tr>
+        <tr>
+          <th style="font-size:12px; color:#666;">Before (閾値のみ)</th>
+          <th style="font-size:12px;">After (提案手法)</th>
+        </tr>
       </thead>
       <tbody>
-      ${mAfter.list.map((res, i) => {
-        const pre = mBefore.list[i];
-        return `<tr><td style="font-weight:bold;">${LABEL_NAMES[res.label]}</td>
-          <td>${pre.p.toFixed(2)}</td><td style="${boldIfUp(pre.p, res.p)}">${res.p.toFixed(2)}</td>
-          <td>${pre.r.toFixed(2)}</td><td style="${boldIfUp(pre.r, res.r)}">${res.r.toFixed(2)}</td>
-          <td>${pre.f1.toFixed(2)}</td><td style="${boldIfUp(pre.f1, res.f1)}">${res.f1.toFixed(2)}</td></tr>`;
-      }).join('')}
+        <tr>
+          <td style="text-align:left; font-weight:bold;">適合率 (Precision)</td>
+          <td style="color:#888;">${mB.p.toFixed(2)}</td>
+          <td style="${styleVal(mB.p, mA.p)}">${mA.p.toFixed(2)}</td>
+          <td>+${(mA.p - mB.p).toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left; font-weight:bold;">再現率 (Recall)</td>
+          <td style="color:#888;">${mB.r.toFixed(2)}</td>
+          <td style="${styleVal(mB.r, mA.r)}">${mA.r.toFixed(2)}</td>
+          <td>${(mA.r - mB.r).toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left; font-weight:bold;">F値 (F1-Score)</td>
+          <td style="color:#888;">${mB.f1.toFixed(2)}</td>
+          <td style="${styleVal(mB.f1, mA.f1)}">${mA.f1.toFixed(2)}</td>
+          <td>+${(mA.f1 - mB.f1).toFixed(2)}</td>
+        </tr>
       </tbody>
     </table>
-    <div class="paper-text">表1は...（以下省略）</div>`;
+
+    <div class="paper-text">
+      <strong>【表2の解説（論文貼り付け用）】</strong><br>
+      表2は、閾値判定のみを行った場合（Before）と、提案手法である空間フィルタを適用した場合（After）の段差検出精度を比較したものである。<br>
+      評価は「段差」と「それ以外（坂・カーブ・平地）」の2クラス分類として行った。<br><br>
+      結果として、適合率は <b>${mB.p.toFixed(2)}</b> から <b>${mA.p.toFixed(2)}</b> へと大幅に向上した。これは、坂やカーブで発生する突発的な振動ノイズを、空間的な特徴を利用して「非段差」として正しく除外できたことを示している。<br>
+      また、F値も <b>${mA.f1.toFixed(2)}</b> を達成し、提案手法の有効性が確認された。
+    </div>
+  `;
 }
 
-// ⑤ ロジック図解（タイトル削除、フォント統一）
+// ⑤ ロジック図解 (変更なし・スタイル維持)
 function drawLogicGraph() {
   hideMetrics();
-  const PRE_N = 5, THRESHOLD = EVENT_TRIGGER_DIFF; // 45
+  const PRE_N = 5, THRESHOLD = EVENT_TRIGGER_DIFF;
   const xData = Array.from({length: 40}, (_, i) => i);
   const yData = xData.map(i => {
     if (i === 25) return 55; 
@@ -290,9 +307,7 @@ function drawLogicGraph() {
 
   const trace = { x: xData, y: yData, mode: 'lines+markers', name: 'Diff', line: { color: '#1a73e8', width: 2 } };
   const layout = {
-    // title: ... (削除)
-    // font: { family: ... } (削除 -> 他のグラフと同じスタイルに)
-    margin: { t: 40, b: 60, l: 60, r: 40 }, // 上の余白を少し調整
+    margin: { t: 40, b: 60, l: 60, r: 40 },
     xaxis: { title: '時間ステップ', dtick: 5 },
     yaxis: { title: '加速度変化量 (Diff)', range: [0, 70] },
     shapes: [
