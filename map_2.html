@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Step Detection Map - Binary Mode</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+<style>
+html, body { height:100%; margin:0; }
+#map { width:100%; height:100%; }
+
+.panel {
+  position:absolute;
+  top:10px; left:10px;
+  background:white;
+  padding:15px;
+  border-radius:8px;
+  box-shadow:0 0 6px rgba(0,0,0,.25);
+  z-index:1000;
+  width:240px;
+  font-size:14px;
+  font-family: sans-serif;
+}
+
+.panel h3 { margin:0 0 10px; font-size:16px; border-bottom: 2px solid #eee; padding-bottom: 5px;}
+
+/* 二値分類用のスタイル */
+.legend div { display:flex; align-items:center; margin-bottom:8px; }
+.box { width:15px; height:15px; border-radius:50%; margin-right:8px; border: 1px solid #ccc; }
+
+/* ボタンのデザイン変更 */
+.btn-group { display: flex; gap: 5px; margin-top: 5px; }
+button { flex: 1; padding: 8px; cursor:pointer; border:none; border-radius:4px; font-weight:bold; }
+
+.btn-step { background:#dc3545; color:white; } /* 赤 */
+.btn-other { background:#28a745; color:white; } /* 緑 */
+.btn-del { background:#666; color:white; font-size: 11px; width: 100%; margin-top:5px;}
+
+.panel-toggle {
+  display:block; width:100%; text-align:center; background:#f8f9fa;
+  padding:5px 0; cursor:pointer; border-radius:4px; margin-bottom:10px; font-size:12px; border: 1px solid #ddd;
+}
+</style>
+</head>
+
+<body>
+<div id="map"></div>
+
+<div class="panel">
+  <div class="panel-toggle" id="togglePanel">▲ メニューを閉じる</div>
+  <div id="panelContent">
+    <h3>表示モード</h3>
+    <div>
+      <label><input type="radio" name="viewMode" value="auto" checked> 自動判定 (Auto)</label><br>
+      <label><input type="radio" name="viewMode" value="gt"> 正解ラベル (GT)</label>
+    </div>
+
+    <hr>
+
+    <h3>フィルタ</h3>
+    <label><input type="checkbox" id="f_step" checked> <span style="color:#dc3545; font-weight:bold;">● 段差 (Step)</span></label><br>
+    <label><input type="checkbox" id="f_other" checked> <span style="color:#28a745; font-weight:bold;">● その他 (Other)</span></label>
+    <div style="font-size:11px; color:#666; margin-left:20px;">※坂・カーブ・平地を含む</div>
+
+    <br>
+    <label>セッション:
+      <select id="sessionSelect" style="width:100%;">
+        <option value="all">全て表示</option>
+      </select>
+    </label>
+
+    <hr>
+    
+    <h3>一括処理</h3>
+    <button id="bulkGT" style="background:#1a73e8; color:white;">未判定を一括でGT保存</button>
+    <div style="font-size:10px; color:#666; margin-top:4px;">※現在の自動判定ラベルを正解として保存します</div>
+
+    <hr>
+
+    <h3>グルーピング (集約)</h3>
+    <label><input type="radio" name="grouping" value="smart" checked> スマート (推奨)</label><br>
+    <label><input type="radio" name="grouping" value="all"> 全件表示 (バラバラ)</label>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+const app = initializeApp({ apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo", projectId: "bike-barrier-detector-1e128" });
+const db = getFirestore(app);
+const map = L.map("map");
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+let markers = [];
+let allEvents = [];
+let gtMap = {};
+let groupingMode = "smart";
+
+// ★ここが重要：ラベルを強制的に2種類にする
+function normalize(label) {
+  if (!label) return "other"; // 未定義はother
+  // "step" 以外はすべて "other" (非段差) に統合
+  return label === "step" ? "step" : "other";
+}
+
+// 色の定義
+function getColor(label, isSelected) {
+  const norm = normalize(label);
+  const color = norm === "step" ? "#dc3545" : "#28a745"; // 赤 vs 緑
+  if (!isSelected) {
+    // 未判定などは薄くする
+    return norm === "step" ? "rgba(220, 53, 69, 0.3)" : "rgba(40, 167, 69, 0.3)";
+  }
+  return color;
+}
+
+async function loadData() {
+  const [eSnap, lSnap] = await Promise.all([
+    getDocs(collection(db, "raw_events")),
+    getDocs(collection(db, "event_labels"))
+  ]);
+  allEvents = eSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  lSnap.docs.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
+  
+  // 初期表示位置
+  if(allEvents.length > 0) {
+    const center = allEvents.reduce((a,b)=>({lat:a.lat+b.lat, lng:a.lng+b.lng}), {lat:0,lng:0});
+    map.setView([center.lat/allEvents.length, center.lng/allEvents.length], 16);
+  } else {
+    map.setView([35.6812, 139.7671], 15);
+  }
+  
+  populateSession();
+  draw();
+}
+
+function populateSession() {
+  const sel = document.getElementById("sessionSelect");
+  const sIds = [...new Set(allEvents.map(e=>e.sessionId))].sort();
+  sIds.forEach(id => {
+    const opt = document.createElement("option");
+    opt.value = id; opt.innerText = id;
+    sel.appendChild(opt);
+  });
+  sel.onchange = draw;
+}
+
+// スマートグルーピング（近傍をまとめる）
+function groupSmart(events) {
+  const radius = 6; // メートル
+  const clusters = [];
+  const used = new Set();
+  
+  events.forEach(ev => {
+    if(used.has(ev.id)) return;
+    const cluster = [ev];
+    used.add(ev.id);
+    
+    // 単純な距離でまとめる
+    events.forEach(target => {
+      if(used.has(target.id)) return;
+      const dist = Math.sqrt((ev.lat-target.lat)**2 + (ev.lng-target.lng)**2) * 111000;
+      if(dist <= radius) {
+        cluster.push(target);
+        used.add(target.id);
+      }
+    });
+    clusters.push(cluster);
+  });
+  return clusters;
+}
+
+function draw() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+  
+  const mode = document.querySelector("input[name=viewMode]:checked").value;
+  const sess = document.getElementById("sessionSelect").value;
+  
+  let targetEvents = allEvents.filter(e => sess === "all" || e.sessionId === sess);
+  const groups = groupingMode === "smart" ? groupSmart(targetEvents) : targetEvents.map(e=>[e]);
+  
+  groups.forEach(group => {
+    // 代表座標
+    const lat = group.reduce((s,e)=>s+e.lat,0)/group.length;
+    const lng = group.reduce((s,e)=>s+e.lng,0)/group.length;
+    
+    // ラベル判定（多数決）
+    let stepCount = 0;
+    let otherCount = 0;
+    
+    group.forEach(e => {
+      // GTモードならGT優先、なければAuto
+      const rawLabel = mode === "gt" ? (gtMap[e.id] || e.autoLabel) : e.autoLabel;
+      if (normalize(rawLabel) === "step") stepCount++; else otherCount++;
+    });
+    
+    const finalLabel = stepCount >= otherCount ? "step" : "other";
+    const hasGT = group.some(e => gtMap[e.id]); // GT済みか？
+    
+    const color = getColor(finalLabel, hasGT || mode==="auto"); // GTモードで未入力なら薄く
+    
+    const m = L.circleMarker([lat, lng], {
+      radius: 8, color: color, fillColor: color, fillOpacity: 0.7, weight: 2
+    }).addTo(map);
+    
+    // フィルタ用プロパティ
+    m.myLabel = finalLabel; 
+    
+    // ポップアップ
+    const div = document.createElement("div");
+    div.innerHTML = `
+      <div style="font-weight:bold; margin-bottom:5px; color:${color}">
+        ${finalLabel==="step" ? "■ 段差 (Step)" : "■ その他 (Other)"}
+      </div>
+      <div style="font-size:12px; margin-bottom:5px;">
+        件数: ${group.length}件<br>
+        (Step: ${stepCount}, Other: ${otherCount})
+      </div>
+      <div class="btn-group">
+        <button class="btn-step" onclick="window.setLabel('${group[0].id}', 'step')">段差</button>
+        <button class="btn-other" onclick="window.setLabel('${group[0].id}', 'other')">その他</button>
+      </div>
+      <button class="btn-del" onclick="window.delEvent('${group[0].id}')">削除</button>
+    `;
+    m.bindPopup(div);
+    markers.push(m);
+  });
+  
+  applyFilter();
+}
+
+function applyFilter() {
+  const showStep = document.getElementById("f_step").checked;
+  const showOther = document.getElementById("f_other").checked;
+  
+  markers.forEach(m => {
+    if (m.myLabel === "step" && showStep) m.addTo(map);
+    else if (m.myLabel === "other" && showOther) m.addTo(map);
+    else map.removeLayer(m);
+  });
+}
+
+// Global functions for popup
+window.setLabel = async (id, val) => {
+  // グループの代表IDを受け取るが、本来はグループ全件やるべきだが今回は簡易的に代表1件更新で再描画させる
+  // もし厳密にやるならグループID管理が必要
+  await setDoc(doc(db, "event_labels", id), {
+    eventId: id, groundTruth: val, labeledAt: new Date().toISOString()
+  });
+  // メモリ更新して再描画
+  gtMap[id] = val;
+  // ★ここポイント：他の「curve/hill」なども、上書きで「other」にしてしまう
+  draw();
+};
+
+window.delEvent = async (id) => {
+  if(!confirm("削除しますか？")) return;
+  await deleteDoc(doc(db, "raw_events", id));
+  // メモリから消す
+  allEvents = allEvents.filter(e => e.id !== id);
+  draw();
+};
+
+document.querySelectorAll("input").forEach(el => el.onchange = () => {
+  if(el.name === "grouping") groupingMode = el.value;
+  draw();
+});
+document.getElementById("togglePanel").onclick = () => {
+  const p = document.getElementById("panelContent");
+  p.style.display = p.style.display === "none" ? "block" : "none";
+};
+
+// 一括GT
+document.getElementById("bulkGT").onclick = async () => {
+  if(!confirm("現在の自動判定ラベルを正解として保存しますか？")) return;
+  const tasks = [];
+  allEvents.forEach(e => {
+    if(!gtMap[e.id]) {
+      const label = normalize(e.autoLabel); // 強制的にstep/otherにする
+      tasks.push(setDoc(doc(db, "event_labels", e.id), {
+        eventId: e.id, groundTruth: label, labeledAt: new Date().toISOString()
+      }));
+      gtMap[e.id] = label;
+    }
+  });
+  await Promise.all(tasks);
+  alert("完了しました");
+  draw();
+};
+
+loadData();
+</script>
+</body>
+</html>
