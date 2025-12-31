@@ -10,7 +10,7 @@
   .container { max-width: 1000px; margin: 0 auto; padding: 20px; font-family: sans-serif; }
   header { background: #1a73e8; color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; font-family: sans-serif; }
   .nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; font-family: sans-serif; flex-wrap: wrap; }
-  button { padding: 12px 20px; border: none; border-radius: 8px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+  button { padding: 10px 15px; border: none; border-radius: 8px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); font-size: 13px; }
   button.active { background: #1a73e8; color: white; }
   .chart-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); min-height: 600px; position: relative; font-family: sans-serif; }
   
@@ -50,6 +50,8 @@
     <button id="btn3">③ 導入効果</button>
     <button id="btn4">④ 最終評価(表)</button>
     <button id="btn5">⑤ 検出ロジック(図)</button>
+    <button id="btn6">⑥ 詳細レポート(後)</button>
+    <button id="btn7">⑦ 詳細レポート(前)</button>
   </div>
   <div class="chart-card">
     <div id="plot" style="width:100%; height:550px;"></div>
@@ -148,13 +150,13 @@ async function init() {
     const m = calcMetrics(r);
     if (m.f1 > maxF1) { maxF1 = m.f1; bestR = r; bestF1 = m.f1; }
   }
-  document.getElementById("bestRadiusTag").textContent = `最適半径: ${bestR}m (Step F1: ${bestF1.toFixed(3)})`;
+  console.log(`最適半径: ${bestR}m (Step F1: ${bestF1.toFixed(3)})`);
   drawScatter();
 }
 
 // === 描画関数群 ===
 
-// ① 散布図 (2クラス)
+// ① 散布図
 function drawScatter() {
   hideMetrics();
   const categories = [
@@ -174,7 +176,7 @@ function drawScatter() {
     xaxis: {title: '最大変化量 (diffMax)', range: [30, 100]}, 
     yaxis: {title: 'Z軸比率 (zRatio)', range: [0, 1.1]},
     shapes: [
-      { // 段差判定エリア
+      { 
         type: 'rect', x0: STEP_JUDGE_DIFF, y0: FIXED_ZRATIO, x1: 200, y1: 1.1, 
         fillcolor: 'rgba(255, 0, 0, 0.1)', line: { width: 0 }
       },
@@ -191,7 +193,7 @@ function drawScatter() {
   Plotly.newPlot('plot', traces, layout);
 }
 
-// ② F1感度 (段差クラスに対するF値)
+// ② F1感度
 function drawSensitivity() {
   hideMetrics();
   const radii = []; for(let r=0; r<=10; r+=0.5) radii.push(r);
@@ -208,11 +210,11 @@ function drawSensitivity() {
   });
 }
 
-// ③ 導入効果 (棒グラフ)
+// ③ 導入効果
 function drawComp() {
   hideMetrics();
-  const m0 = calcMetrics(0);      // フィルタなし
-  const mOpt = calcMetrics(bestR); // 最適フィルタ
+  const m0 = calcMetrics(0);      
+  const mOpt = calcMetrics(bestR); 
   
   const labelsJP = ['適合率', '再現率', 'F値'];
   const vals0 = [m0.p, m0.r, m0.f1];
@@ -228,24 +230,23 @@ function drawComp() {
   });
 }
 
-// ④ 最終評価テーブル (論文 表2用)
+// ④ 最終評価テーブル
 function drawAccuracyMetrics() {
   document.getElementById("plot").innerHTML = ""; document.getElementById("plot").style.height = "0px";
   const area = document.getElementById("metricsArea"); area.style.display = "block";
   
   if (allData.length === 0) { area.innerHTML = "Loading..."; return; }
   
-  const mB = calcMetrics(0);     // Before
-  const mA = calcMetrics(bestR); // After
+  const mB = calcMetrics(0);     
+  const mA = calcMetrics(bestR); 
   
-  // 改善した数値を太字にするヘルパー
   const styleVal = (v1, v2) => v2 > v1 ? "font-weight:bold; color:#1a73e8;" : "";
 
   area.innerHTML = `
     <div class="summary-box">
-      <div class="stat-card"><span class="stat-lbl">適合率 (Precision)</span><span class="stat-val">${(mA.p).toFixed(2)}</span></div>
-      <div class="stat-card"><span class="stat-lbl">F値 (F1-Score)</span><span class="stat-val" style="color:#d93025">${(mA.f1).toFixed(2)}</span></div>
-      <div class="stat-card"><span class="stat-lbl">正解率 (Accuracy)</span><span class="stat-val">${(mA.acc).toFixed(2)}</span></div>
+      <div class="stat-card"><span class="stat-lbl">適合率</span><span class="stat-val">${(mA.p).toFixed(2)}</span></div>
+      <div class="stat-card"><span class="stat-lbl">F値</span><span class="stat-val" style="color:#d93025">${(mA.f1).toFixed(2)}</span></div>
+      <div class="stat-card"><span class="stat-lbl">正解率</span><span class="stat-val">${(mA.acc).toFixed(2)}</span></div>
     </div>
     
     <h3 style="font-family:serif; text-align:center; margin-bottom:5px;">表2. 提案手法の導入による段差検出精度の比較</h3>
@@ -284,7 +285,7 @@ function drawAccuracyMetrics() {
     </table>
 
     <div class="paper-text">
-      <strong>【表2の解説（論文貼り付け用）】</strong><br>
+      <strong>【表2の解説】</strong><br>
       表2は、閾値判定のみを行った場合（Before）と、提案手法である空間フィルタを適用した場合（After）の段差検出精度を比較したものである。<br>
       評価は「段差」と「それ以外（坂・カーブ・平地）」の2クラス分類として行った。<br><br>
       結果として、適合率は <b>${mB.p.toFixed(2)}</b> から <b>${mA.p.toFixed(2)}</b> へと大幅に向上した。これは、坂やカーブで発生する突発的な振動ノイズを、空間的な特徴を利用して「非段差」として正しく除外できたことを示している。<br>
@@ -293,34 +294,313 @@ function drawAccuracyMetrics() {
   `;
 }
 
-// ⑤ ロジック図解 (変更なし・スタイル維持)
+// ⑤ ロジック図解（フィルタ導入前であることを明示）
 function drawLogicGraph() {
-  hideMetrics();
-  const PRE_N = 5, THRESHOLD = EVENT_TRIGGER_DIFF;
+  document.getElementById("plot").innerHTML = ""; 
+  document.getElementById("plot").style.height = "450px"; 
+  const area = document.getElementById("metricsArea"); 
+  area.style.display = "block";
+
+  const PRE_N = 5, THRESHOLD = EVENT_TRIGGER_DIFF; 
   const xData = Array.from({length: 40}, (_, i) => i);
   const yData = xData.map(i => {
-    if (i === 25) return 55; 
+    if (i === 25) return 62; 
     if (i >= 21 && i < 25) return 20 + Math.random() * 15;
     return 10 + Math.random() * 10;
   });
   const triggerIdx = 25;
 
-  const trace = { x: xData, y: yData, mode: 'lines+markers', name: 'Diff', line: { color: '#1a73e8', width: 2 } };
+  const trace = { 
+    x: xData, y: yData, 
+    mode: 'lines+markers', 
+    name: '加速度変化 (Diff)', 
+    line: { color: '#1a73e8', width: 2 },
+    marker: { size: 6 }
+  };
+
   const layout = {
-    margin: { t: 40, b: 60, l: 60, r: 40 },
-    xaxis: { title: '時間ステップ', dtick: 5 },
-    yaxis: { title: '加速度変化量 (Diff)', range: [0, 70] },
+    title: { text: '基本検知ロジック (フィルタ導入前)', font: { size: 16 } },
+    margin: { t: 50, b: 40, l: 60, r: 40 },
+    xaxis: { title: '時間ステップ (t)', dtick: 5 },
+    yaxis: { title: '加速度変化量 (Diff)', range: [0, 80] },
     shapes: [
       { type: 'line', x0: 0, y0: THRESHOLD, x1: 39, y1: THRESHOLD, line: { color: '#d93025', width: 2, dash: 'dash' } },
-      { type: 'rect', x0: triggerIdx - PRE_N + 1 - 0.5, y0: 0, x1: triggerIdx + 0.5, y1: 70, fillcolor: 'rgba(255, 165, 0, 0.2)', line: { width: 0 } }
+      { type: 'rect', x0: triggerIdx - 0.5, y0: 0, x1: triggerIdx + 0.5, y1: 80, fillcolor: 'rgba(255, 0, 0, 0.1)', line: { width: 0 } }
     ],
     annotations: [
-      { x: triggerIdx, y: yData[triggerIdx], text: '<b>検知</b><br>(diff ≥ 45)', showarrow: true, arrowhead: 2, ax: 40, ay: -40, font: { color: '#d93025' } },
-      { x: 0, y: THRESHOLD, text: `閾値=${THRESHOLD}`, showarrow: false, xanchor: 'left', yanchor: 'bottom', font: { color: '#d93025' } },
-      { x: triggerIdx - 2, y: 5, text: `判定区間 (PRE_N=${PRE_N})`, showarrow: false, font: { color: '#e37400' }, bgcolor:'rgba(255,255,255,0.7)' }
+      { 
+        x: triggerIdx, y: yData[triggerIdx], 
+        text: `<b>検知！</b><br>Diff=${yData[triggerIdx]} (≧${THRESHOLD})`, 
+        showarrow: true, arrowhead: 2, ax: 50, ay: -30, 
+        font: { color: '#d93025', size: 14, weight: 'bold' },
+        bgcolor: 'rgba(255, 255, 255, 0.8)', bordercolor: '#d93025'
+      },
+      { 
+        x: 0, y: THRESHOLD, 
+        text: `検知閾値 = ${THRESHOLD}`, 
+        showarrow: false, xanchor: 'left', yanchor: 'bottom', 
+        font: { color: '#d93025', weight: 'bold' } 
+      }
     ]
   };
+
   Plotly.newPlot('plot', [trace], layout);
+
+  area.innerHTML = `
+    <div class="paper-text" style="margin-top: 10px;">
+      <h4 style="margin-top:0;">【フィルタ導入前の判定ロジック】</h4>
+      <p>
+        この図は、空間フィルタ（提案手法）を適用する前の<strong>「基本的な閾値判定」</strong>の様子を示しています。<br>
+        加速度センサーの数値変化（Diff）が閾値（${THRESHOLD}）を超えた瞬間、即座に「段差」として検知します。
+      </p>
+      <p>
+        <strong>課題：</strong><br>
+        この単純なロジック（Before）では、坂道やカーブなどの「非段差」で発生する振動も、閾値を超えればすべて「段差」と誤判定（False Positive）してしまいます。<br>
+        この誤検知を減らすために、本研究ではこの後に「空間フィルタ」を導入しています。
+      </p>
+    </div>
+  `;
+}
+
+// ⑥ 詳細レポート (日本語・小数点2桁・After)
+function drawDetailedReport() {
+  document.getElementById("plot").innerHTML = ""; 
+  document.getElementById("plot").style.height = "0px";
+  const area = document.getElementById("metricsArea"); 
+  area.style.display = "block";
+
+  if (allData.length === 0) { area.innerHTML = "Loading..."; return; }
+
+  const m = calcMetrics(bestR); // フィルタあり (BestR)
+  
+  // クラス別指標計算
+  const stepP = m.p;
+  const stepR = m.r;
+  const stepF1 = m.f1;
+  const stepSup = m.tp + m.fn; 
+
+  const otherP = m.tn / (m.tn + m.fn) || 0;
+  const otherR = m.tn / (m.tn + m.fp) || 0;
+  const otherF1 = (2 * otherP * otherR) / (otherP + otherR) || 0;
+  const otherSup = m.tn + m.fp; 
+
+  // 平均計算
+  const macroP = (stepP + otherP) / 2;
+  const macroR = (stepR + otherR) / 2;
+  const macroF1 = (stepF1 + otherF1) / 2;
+
+  const total = allData.length;
+  const weightP = (stepP * stepSup + otherP * otherSup) / total;
+  const weightR = (stepR * stepSup + otherR * otherSup) / total;
+  const weightF1 = (stepF1 * stepSup + otherF1 * otherSup) / total;
+
+  area.innerHTML = `
+    <h3 style="font-family:serif; text-align:center; margin-bottom:10px;">【導入後 (After)】詳細評価レポート</h3>
+    <p style="text-align:center; font-size:14px; color:#666;">適用フィルタ半径 R = ${bestR}m</p>
+
+    <h4 style="margin:20px 0 10px 0;">1. クラス別精度 (小数点第2位まで)</h4>
+    <table class="metrics-table">
+      <thead>
+        <tr>
+          <th style="text-align:left;">クラス</th>
+          <th>適合率</th>
+          <th>再現率</th>
+          <th>F値</th>
+          <th>データ数</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="text-align:left; font-weight:bold; color:#dc3545;">段差 (Step)</td>
+          <td>${stepP.toFixed(2)}</td>
+          <td>${stepR.toFixed(2)}</td>
+          <td>${stepF1.toFixed(2)}</td>
+          <td>${stepSup}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left; font-weight:bold; color:#28a745;">非段差 (Other)</td>
+          <td>${otherP.toFixed(2)}</td>
+          <td>${otherR.toFixed(2)}</td>
+          <td>${otherF1.toFixed(2)}</td>
+          <td>${otherSup}</td>
+        </tr>
+        <tr style="border-top:2px solid #aaa; font-weight:bold; background:#f0f0f0;">
+          <td style="text-align:left;">正解率 (Accuracy)</td>
+          <td colspan="2"></td>
+          <td>${m.acc.toFixed(2)}</td>
+          <td>${total}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">マクロ平均 (Macro Avg)</td>
+          <td>${macroP.toFixed(2)}</td>
+          <td>${macroR.toFixed(2)}</td>
+          <td>${macroF1.toFixed(2)}</td>
+          <td>${total}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">加重平均 (Weighted Avg)</td>
+          <td>${weightP.toFixed(2)}</td>
+          <td>${weightR.toFixed(2)}</td>
+          <td>${weightF1.toFixed(2)}</td>
+          <td>${total}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h4 style="margin:30px 0 10px 0;">2. 混同行列 (Confusion Matrix)</h4>
+    <div style="display:flex; justify-content:center; gap:20px; align-items:flex-start;">
+      <table class="metrics-table" style="width:auto; min-width:400px;">
+        <thead>
+          <tr>
+            <th rowspan="2" style="vertical-align:middle; background:#f9f9f9;">実際のクラス</th>
+            <th colspan="2" style="background:#e8f0fe;">予測クラス (提案手法)</th>
+          </tr>
+          <tr>
+            <th style="width:120px; color:#dc3545;">段差</th>
+            <th style="width:120px; color:#28a745;">非段差</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="font-weight:bold; color:#dc3545;">段差</td>
+            <td style="background:#e6fffa; font-weight:bold; font-size:18px;">${m.tp} <br><span style="font-size:11px; font-weight:normal; color:#28a745;">(正解)</span></td>
+            <td style="background:#fff5f5;">${m.fn} <br><span style="font-size:11px; color:#d93025;">(見逃し)</span></td>
+          </tr>
+          <tr>
+            <td style="font-weight:bold; color:#28a745;">非段差</td>
+            <td style="background:#fff5f5;">${m.fp} <br><span style="font-size:11px; color:#d93025;">(誤検知)</span></td>
+            <td style="background:#e6fffa; font-weight:bold; font-size:18px;">${m.tn} <br><span style="font-size:11px; font-weight:normal; color:#28a745;">(正解)</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="paper-text">
+      <strong>【結果】</strong><br>
+      提案手法（空間フィルタ）の適用により、誤検知（FP）が導入前に比べて抑制されていることがわかる。
+    </div>
+  `;
+}
+
+// ⑦ 詳細レポート (導入前・Before) - NEW!
+function drawBeforeReport() {
+  document.getElementById("plot").innerHTML = ""; 
+  document.getElementById("plot").style.height = "0px";
+  const area = document.getElementById("metricsArea"); 
+  area.style.display = "block";
+
+  if (allData.length === 0) { area.innerHTML = "Loading..."; return; }
+
+  const m = calcMetrics(0); // ★ここが重要：半径0＝フィルタなし（閾値のみ）
+  
+  // クラス別指標計算
+  const stepP = m.p;
+  const stepR = m.r;
+  const stepF1 = m.f1;
+  const stepSup = m.tp + m.fn; 
+
+  const otherP = m.tn / (m.tn + m.fn) || 0;
+  const otherR = m.tn / (m.tn + m.fp) || 0;
+  const otherF1 = (2 * otherP * otherR) / (otherP + otherR) || 0;
+  const otherSup = m.tn + m.fp; 
+
+  // 平均計算
+  const macroP = (stepP + otherP) / 2;
+  const macroR = (stepR + otherR) / 2;
+  const macroF1 = (stepF1 + otherF1) / 2;
+
+  const total = allData.length;
+  const weightP = (stepP * stepSup + otherP * otherSup) / total;
+  const weightR = (stepR * stepSup + otherR * otherSup) / total;
+  const weightF1 = (stepF1 * stepSup + otherF1 * otherSup) / total;
+
+  area.innerHTML = `
+    <h3 style="font-family:serif; text-align:center; margin-bottom:10px;">【導入前 (Before)】詳細評価レポート</h3>
+    <p style="text-align:center; font-size:14px; color:#666;">適用フィルタ半径 R = 0m (閾値判定のみ)</p>
+
+    <h4 style="margin:20px 0 10px 0;">1. クラス別精度 (閾値判定のみ)</h4>
+    <table class="metrics-table">
+      <thead>
+        <tr>
+          <th style="text-align:left;">クラス</th>
+          <th>適合率</th>
+          <th>再現率</th>
+          <th>F値</th>
+          <th>データ数</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="text-align:left; font-weight:bold; color:#dc3545;">段差 (Step)</td>
+          <td>${stepP.toFixed(2)}</td>
+          <td>${stepR.toFixed(2)}</td>
+          <td>${stepF1.toFixed(2)}</td>
+          <td>${stepSup}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left; font-weight:bold; color:#28a745;">非段差 (Other)</td>
+          <td>${otherP.toFixed(2)}</td>
+          <td>${otherR.toFixed(2)}</td>
+          <td>${otherF1.toFixed(2)}</td>
+          <td>${otherSup}</td>
+        </tr>
+        <tr style="border-top:2px solid #aaa; font-weight:bold; background:#f0f0f0;">
+          <td style="text-align:left;">正解率 (Accuracy)</td>
+          <td colspan="2"></td>
+          <td>${m.acc.toFixed(2)}</td>
+          <td>${total}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">マクロ平均 (Macro Avg)</td>
+          <td>${macroP.toFixed(2)}</td>
+          <td>${macroR.toFixed(2)}</td>
+          <td>${macroF1.toFixed(2)}</td>
+          <td>${total}</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">加重平均 (Weighted Avg)</td>
+          <td>${weightP.toFixed(2)}</td>
+          <td>${weightR.toFixed(2)}</td>
+          <td>${weightF1.toFixed(2)}</td>
+          <td>${total}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h4 style="margin:30px 0 10px 0;">2. 混同行列 (Confusion Matrix)</h4>
+    <div style="display:flex; justify-content:center; gap:20px; align-items:flex-start;">
+      <table class="metrics-table" style="width:auto; min-width:400px;">
+        <thead>
+          <tr>
+            <th rowspan="2" style="vertical-align:middle; background:#f9f9f9;">実際のクラス</th>
+            <th colspan="2" style="background:#e8f0fe;">予測クラス (閾値のみ)</th>
+          </tr>
+          <tr>
+            <th style="width:120px; color:#dc3545;">段差</th>
+            <th style="width:120px; color:#28a745;">非段差</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="font-weight:bold; color:#dc3545;">段差</td>
+            <td style="background:#e6fffa; font-weight:bold; font-size:18px;">${m.tp} <br><span style="font-size:11px; font-weight:normal; color:#28a745;">(正解)</span></td>
+            <td style="background:#fff5f5;">${m.fn} <br><span style="font-size:11px; color:#d93025;">(見逃し)</span></td>
+          </tr>
+          <tr>
+            <td style="font-weight:bold; color:#28a745;">非段差</td>
+            <td style="background:#fff5f5;">${m.fp} <br><span style="font-size:11px; color:#d93025;">(誤検知)</span></td>
+            <td style="background:#e6fffa; font-weight:bold; font-size:18px;">${m.tn} <br><span style="font-size:11px; font-weight:normal; color:#28a745;">(正解)</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="paper-text">
+      <strong>【Beforeの分析】</strong><br>
+      この表は、空間フィルタを適用せず、加速度センサーの閾値のみで判定した場合の結果である。<br>
+      混同行列の「誤検知 (FP)」の多さに注目されたい。坂やカーブなどの振動を「段差」と誤認しているケースが多く、これが全体の適合率（Precision）を下げる主な要因となっていた。
+    </div>
+  `;
 }
 
 function hideMetrics() { document.getElementById("metricsArea").style.display = "none"; document.getElementById("plot").style.height = "550px"; }
@@ -330,6 +610,9 @@ document.getElementById("btn2").onclick = (e) => { switchTab(e); drawSensitivity
 document.getElementById("btn3").onclick = (e) => { switchTab(e); drawComp(); };
 document.getElementById("btn4").onclick = (e) => { switchTab(e); drawAccuracyMetrics(); };
 document.getElementById("btn5").onclick = (e) => { switchTab(e); drawLogicGraph(); };
+document.getElementById("btn6").onclick = (e) => { switchTab(e); drawDetailedReport(); };
+document.getElementById("btn7").onclick = (e) => { switchTab(e); drawBeforeReport(); }; // 追加
+
 init();
 </script>
 </body>
