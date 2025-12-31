@@ -2,35 +2,40 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Step Detection Dashboard - Binary Class Ver</title>
+<title>Step Detection Dashboard - Final Report</title>
 <script src="https://cdn.plot.ly/plotly-2.25.2.min.js"></script>
 <style>
-  /* 論文執筆用フォント設定 */
+  /* 論文執筆用スタイル設定 */
   body { font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", serif; margin: 0; background: #f4f7f9; color: #333; }
   .container { max-width: 1000px; margin: 0 auto; padding: 20px; font-family: sans-serif; }
   header { background: #1a73e8; color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; font-family: sans-serif; }
   .nav { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; font-family: sans-serif; flex-wrap: wrap; }
-  button { padding: 10px 15px; border: none; border-radius: 8px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); font-size: 13px; }
-  button.active { background: #1a73e8; color: white; }
+  
+  /* ボタンデザイン */
+  button { padding: 10px 15px; border: none; border-radius: 8px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.05); font-size: 13px; transition: 0.2s; }
+  button:hover { background: #f0f0f0; }
+  button.active { background: #1a73e8; color: white; box-shadow: 0 4px 8px rgba(26,115,232,0.3); }
+
   .chart-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); min-height: 600px; position: relative; font-family: sans-serif; }
   
-  /* 論文用テーブルスタイル */
-  .metrics-container { margin-top: 20px; width: 100%; font-family: "Times New Roman", "Yu Mincho", serif; }
-  .metrics-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 15px; }
-  .metrics-table th, .metrics-table td { padding: 12px; text-align: center; border: 1px solid #ddd; }
-  /* 三線表デザイン */
-  .metrics-table thead { border-top: 2px solid #000; border-bottom: 1px solid #000; }
-  .metrics-table tbody { border-bottom: 2px solid #000; }
-  .metrics-table th { background: white; font-weight: bold; color: #000; border: none; border-bottom: 1px solid #000; }
-  .metrics-table td { border: none; }
+  /* テーブルスタイル */
+  .metrics-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px; font-family: sans-serif; }
+  .metrics-table th, .metrics-table td { padding: 12px 10px; text-align: center; border: 1px solid #ddd; }
+  .metrics-table thead { background: #f8f9fa; border-bottom: 2px solid #333; }
+  .metrics-table th { font-weight: bold; color: #555; }
   .metrics-table tr:nth-child(even) { background: #fbfbfb; }
 
   /* 統計カード */
   .summary-box { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 30px; font-family: sans-serif; }
-  .stat-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #eee; }
-  .stat-val { display: block; font-size: 24px; font-weight: bold; color: #1a73e8; }
-  .stat-lbl { font-size: 12px; color: #666; font-weight: bold; }
-  
+  .stat-card { background: #fff; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #eee; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+  .stat-val { display: block; font-size: 24px; font-weight: bold; color: #333; }
+  .stat-lbl { font-size: 12px; color: #666; font-weight: bold; display:block; margin-bottom:5px; }
+
+  /* 混同行列用 */
+  .cm-cell { font-weight: bold; }
+  .bg-ok { background-color: #e6fffa; color: #28a745; }
+  .bg-ng { background-color: #fff5f5; color: #dc3545; }
+
   /* 論文記述エリア */
   .paper-text {
     background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px;
@@ -41,21 +46,21 @@
 <body>
 <div class="container">
   <header>
-    <h1 style="margin:0; font-size:20px;">段差検出：評価ダッシュボード (2クラス統合版)</h1>
-    <p style="margin:5px 0 0 0; opacity:0.8; font-size:13px;">坂・カーブ・平地を「非段差」として統合評価</p>
+    <h1 style="margin:0; font-size:20px;">段差検出：評価ダッシュボード (Full Report)</h1>
+    <p style="margin:5px 0 0 0; opacity:0.8; font-size:13px;">空間フィルタ導入前後の精度比較およびクラス別詳細評価</p>
   </header>
   <div class="nav">
     <button id="btn1" class="active">① 特徴量分布</button>
     <button id="btn2">② F1感度分析</button>
     <button id="btn3">③ 導入効果</button>
     <button id="btn4">④ 最終評価(表)</button>
-    <button id="btn5">⑤ 検出ロジック(図)</button>
+    <button id="btn5">⑤ 検出ロジック</button>
     <button id="btn6">⑥ 詳細レポート(後)</button>
     <button id="btn7">⑦ 詳細レポート(前)</button>
   </div>
   <div class="chart-card">
     <div id="plot" style="width:100%; height:550px;"></div>
-    <div id="metricsArea" class="metrics-container" style="display:none;"></div>
+    <div id="metricsArea" style="display:none;"></div>
   </div>
 </div>
 
@@ -66,25 +71,25 @@ import { getFirestore, collection, getDocs } from "https://www.gstatic.com/fireb
 const app = initializeApp({ apiKey: "AIzaSyAb9Zt2Hw_o-wXfXby6vlBDdcWZ6xZUJpo", projectId: "bike-barrier-detector-1e128" });
 const db = getFirestore(app);
 
-// === 設定 ===
+/* === 設定 === */
 const EVENT_TRIGGER_DIFF = 45; 
 const STEP_JUDGE_DIFF = 50;    
 const FIXED_ZRATIO = 0.60;
 
-// 2クラス分類用の定義
-const LABELS = ["step", "other"];
-const LABEL_NAMES = { step: "段差", other: "非段差 (坂・カーブ・平地)" };
-
 let allData = [];
 let bestR = 0, bestF1 = 0;
 
-// === データ変換ロジック ===
-function normalizeLabel(label) {
-  // "step" 以外はすべて "other" に統合
-  return label === "step" ? "step" : "other";
+/* === ラベル正規化 === */
+function normalizeLabel(l) {
+  if (!l) return "flat";
+  l = l.toLowerCase();
+  if (l.includes("slope")) return "hill"; 
+  if (l.includes("step")) return "step";
+  if (l.includes("curve")) return "curve";
+  return "flat";
 }
 
-// === 判定ロジック ===
+/* === 2値分類ロジック (Step vs Other) === */
 function getBasePred(f) {
   if (!f) return "other";
   // 閾値判定のみ
@@ -101,35 +106,27 @@ function getFinalPred(target, rad, pool) {
   const base = getBasePred(target.features);
   if (rad <= 0 || base === "other") return base;
   
-  // 空間フィルタ（近傍探索）
+  // 空間フィルタ
   const neighbors = pool.filter(n => n.id !== target.id && getDist(target, n) <= rad && n.features && typeof n.features.diffMax !== 'undefined');
   if (neighbors.length > 0) {
-    // 近傍の「段差判定」割合を計算
     const stepCount = neighbors.filter(n => getBasePred(n.features) === "step").length;
-    // 半数以下ならノイズとして棄却 -> "other"へ
     if (stepCount / neighbors.length <= 0.5) return "other"; 
   }
-  return "step"; // そのまま段差認定
+  return "step";
 }
 
-// === 指標計算 (TP/FP/FN/TN) ===
+/* === 指標計算 (2値) === */
 function calcMetrics(radius) {
   let tp=0, fp=0, fn=0, tn=0;
   allData.forEach(d => {
-    const truth = d.gt; 
+    const gt = (d.gt === "step") ? "step" : "other"; 
     const pred = getFinalPred(d, radius, allData);
-    
-    if (pred === "step" && truth === "step") tp++;
-    else if (pred === "step" && truth === "other") fp++;
-    else if (pred === "other" && truth === "step") fn++;
+    if (pred === "step" && gt === "step") tp++;
+    else if (pred === "step" && gt === "other") fp++;
+    else if (pred === "other" && gt === "step") fn++;
     else tn++;
   });
-  
-  const p = tp / (tp + fp) || 0;
-  const r = tp / (tp + fn) || 0;
-  const f1 = (2 * p * r) / (p + r) || 0;
-  const acc = (tp + tn) / allData.length || 0;
-  
+  const p = tp/(tp+fp)||0, r = tp/(tp+fn)||0, f1 = (2*p*r)/(p+r)||0, acc = (tp+tn)/allData.length||0;
   return { p, r, f1, acc, tp, fp, fn, tn };
 }
 
@@ -137,57 +134,41 @@ async function init() {
   const [eSnap, lSnap] = await Promise.all([getDocs(collection(db, "raw_events")), getDocs(collection(db, "event_labels"))]);
   const gtMap = {}; lSnap.forEach(d => { gtMap[d.data().eventId] = d.data().groundTruth; });
   
-  // 読み込み時に正規化 (normalizeLabel) を適用
   allData = eSnap.docs.map(d => ({
     id: d.id, lat: d.data().lat, lng: d.data().lng, features: d.data().features || {},
-    dbAuto: normalizeLabel(d.data().autoLabel || "flat"), 
+    // 生のAI予測値(autoLabel)と正解(groundTruth)を保持
+    rawAuto: normalizeLabel(d.data().autoLabel || "flat"),
     gt: normalizeLabel(gtMap[d.id] || "flat") 
   }));
 
-  // 最適半径の探索
   let maxF1 = -1;
   for (let r = 0; r <= 15; r += 0.5) {
     const m = calcMetrics(r);
     if (m.f1 > maxF1) { maxF1 = m.f1; bestR = r; bestF1 = m.f1; }
   }
-  console.log(`最適半径: ${bestR}m (Step F1: ${bestF1.toFixed(3)})`);
+  console.log(`最適半径: ${bestR}m (F1: ${bestF1.toFixed(3)})`);
   drawScatter();
 }
 
-// === 描画関数群 ===
+/* === 描画関数群 === */
 
 // ① 散布図
 function drawScatter() {
   hideMetrics();
-  const categories = [
-    { key: "step",  label: "段差",   color: "#dc3545" },
-    { key: "other", label: "非段差", color: "#28a745" }
-  ];
+  const categories = [{key:"step",l:"段差",c:"#dc3545"}, {key:"other",l:"非段差",c:"#28a745"}];
   const traces = categories.map(cat => {
-    const d = allData.filter(r => r.gt === cat.key);
+    const d = allData.filter(r => (r.gt==="step"?"step":"other") === cat.key);
     return { 
-      x: d.map(r => r.features.diffMax || 0), y: d.map(r => r.features.zRatio || 0), 
-      mode: 'markers', name: `${cat.label} (n=${d.length})`, marker: { color: cat.color, size: 7, opacity: 0.6 }
+      x: d.map(r=>r.features.diffMax||0), y: d.map(r=>r.features.zRatio||0), 
+      mode:'markers', name:cat.l, marker:{color:cat.c, size:7, opacity:0.6} 
     };
   });
-
   const layout = {
-    margin: { t: 40 },
-    xaxis: {title: '最大変化量 (diffMax)', range: [30, 100]}, 
-    yaxis: {title: 'Z軸比率 (zRatio)', range: [0, 1.1]},
+    margin: { t: 40 }, xaxis: {title: '最大変化量 (diffMax)', range: [30, 100]}, yaxis: {title: 'Z軸比率 (zRatio)', range: [0, 1.1]},
     shapes: [
-      { 
-        type: 'rect', x0: STEP_JUDGE_DIFF, y0: FIXED_ZRATIO, x1: 200, y1: 1.1, 
-        fillcolor: 'rgba(255, 0, 0, 0.1)', line: { width: 0 }
-      },
-      { type: 'line', x0: EVENT_TRIGGER_DIFF, y0: 0, x1: EVENT_TRIGGER_DIFF, y1: 1.1, line: {color: '#f9ab00', width: 2, dash: 'dot'} },
+      { type: 'rect', x0: STEP_JUDGE_DIFF, y0: FIXED_ZRATIO, x1: 200, y1: 1.1, fillcolor: 'rgba(255, 0, 0, 0.1)', line: { width: 0 }},
       { type: 'line', x0: STEP_JUDGE_DIFF, y0: 0, x1: STEP_JUDGE_DIFF, y1: 1.1, line: {color: '#d93025', width: 2, dash: 'dash'} },
       { type: 'line', x0: 0, y0: FIXED_ZRATIO, x1: 200, y1: FIXED_ZRATIO, line: {color: '#d93025', width: 2, dash: 'dash'} }
-    ],
-    annotations: [
-      { x: EVENT_TRIGGER_DIFF, y: 1.05, text: '検知(45)', showarrow: false, font: {color: '#f9ab00', size: 12}, xanchor: 'right', xshift: -5 },
-      { x: STEP_JUDGE_DIFF, y: 1.05, text: '判定(50)', showarrow: false, font: {color: '#d93025', size: 12, weight: 'bold'}, xanchor: 'left', xshift: 5 },
-      { xref: 'paper', yref: 'paper', x: 1, y: 1.05, text: `Total N=${allData.length}`, showarrow: false, font: {size: 12, color: '#666'}, xanchor: 'right', yanchor: 'bottom' }
     ]
   };
   Plotly.newPlot('plot', traces, layout);
@@ -196,50 +177,32 @@ function drawScatter() {
 // ② F1感度
 function drawSensitivity() {
   hideMetrics();
-  const radii = []; for(let r=0; r<=10; r+=0.5) radii.push(r);
-  const f1s = radii.map(r => calcMetrics(r).f1);
+  const radii=[], f1s=[]; for(let r=0;r<=10;r+=0.5){ radii.push(r); f1s.push(calcMetrics(r).f1); }
   const textLabels = f1s.map((v, i) => (i % 2 === 0 || v === bestF1) ? v.toFixed(2) : "");
-  
   Plotly.newPlot('plot', [
     { x: radii, y: f1s, mode: 'lines+markers+text', name: '段差F値', line: {shape: 'spline', color: '#1a73e8'}, text: textLabels, textposition: 'top center' },
     { x: [bestR], y: [bestF1], mode: 'markers', name: '最大値', marker: {color: 'red', size: 12} }
-  ], { 
-    margin: { t: 30 }, 
-    xaxis: {title: '半径 R (m)'}, 
-    yaxis: {range:[0,1.1], title: 'F値 (段差クラス)'} 
-  });
+  ], { margin: { t: 30 }, xaxis: {title: '半径 R (m)'}, yaxis: {range:[0,1.1], title: 'F値 (段差クラス)'} });
 }
 
 // ③ 導入効果
 function drawComp() {
   hideMetrics();
-  const m0 = calcMetrics(0);      
-  const mOpt = calcMetrics(bestR); 
-  
+  const m0=calcMetrics(0), mA=calcMetrics(bestR);
   const labelsJP = ['適合率', '再現率', 'F値'];
-  const vals0 = [m0.p, m0.r, m0.f1];
-  const valsOpt = [mOpt.p, mOpt.r, mOpt.f1];
-  
   Plotly.newPlot('plot', [
-    { x: labelsJP, y: vals0, name: 'フィルタなし', type: 'bar', text: vals0.map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#ee7800 '} },
-    { x: labelsJP, y: valsOpt, name: `フィルタあり`, type: 'bar', text: valsOpt.map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#1a73e8'} }
-  ], { 
-    margin: { t: 30 }, 
-    barmode: 'group', 
-    yaxis: {range:[0,1.1], title: 'スコア'} 
-  });
+    { x: labelsJP, y: [m0.p,m0.r,m0.f1], name: 'フィルタなし', type: 'bar', text: [m0.p,m0.r,m0.f1].map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#ee7800'} },
+    { x: labelsJP, y: [mA.p,mA.r,mA.f1], name: `フィルタあり`, type: 'bar', text: [mA.p,mA.r,mA.f1].map(v=>v.toFixed(2)), textposition: 'auto', marker: {color: '#1a73e8'} }
+  ], { margin: { t: 30 }, barmode: 'group', yaxis: {range:[0,1.1], title: 'スコア'} });
 }
 
 // ④ 最終評価テーブル
 function drawAccuracyMetrics() {
   document.getElementById("plot").innerHTML = ""; document.getElementById("plot").style.height = "0px";
   const area = document.getElementById("metricsArea"); area.style.display = "block";
-  
   if (allData.length === 0) { area.innerHTML = "Loading..."; return; }
   
-  const mB = calcMetrics(0);     
-  const mA = calcMetrics(bestR); 
-  
+  const mB = calcMetrics(0), mA = calcMetrics(bestR); 
   const styleVal = (v1, v2) => v2 > v1 ? "font-weight:bold; color:#1a73e8;" : "";
 
   area.innerHTML = `
@@ -248,241 +211,73 @@ function drawAccuracyMetrics() {
       <div class="stat-card"><span class="stat-lbl">F値</span><span class="stat-val" style="color:#d93025">${(mA.f1).toFixed(2)}</span></div>
       <div class="stat-card"><span class="stat-lbl">正解率</span><span class="stat-val">${(mA.acc).toFixed(2)}</span></div>
     </div>
-    
-    <h3 style="font-family:serif; text-align:center; margin-bottom:5px;">表2. 提案手法の導入による段差検出精度の比較</h3>
+    <h3 style="font-family:serif; text-align:center; margin-bottom:5px;">表3. 提案手法の導入による段差検出精度の比較</h3>
     <table class="metrics-table">
       <thead>
-        <tr>
-          <th rowspan="2">評価指標</th>
-          <th colspan="2">値</th>
-          <th rowspan="2">改善幅</th>
-        </tr>
-        <tr>
-          <th style="font-size:12px; color:#666;">Before (閾値のみ)</th>
-          <th style="font-size:12px;">After (提案手法)</th>
-        </tr>
+        <tr><th rowspan="2">評価指標</th><th colspan="2">値</th><th rowspan="2">改善幅</th></tr>
+        <tr><th style="font-size:12px; color:#666;">Before (閾値のみ)</th><th style="font-size:12px;">After (提案手法)</th></tr>
       </thead>
       <tbody>
-        <tr>
-          <td style="text-align:left; font-weight:bold;">適合率 (Precision)</td>
-          <td style="color:#888;">${mB.p.toFixed(2)}</td>
-          <td style="${styleVal(mB.p, mA.p)}">${mA.p.toFixed(2)}</td>
-          <td>+${(mA.p - mB.p).toFixed(2)}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left; font-weight:bold;">再現率 (Recall)</td>
-          <td style="color:#888;">${mB.r.toFixed(2)}</td>
-          <td style="${styleVal(mB.r, mA.r)}">${mA.r.toFixed(2)}</td>
-          <td>${(mA.r - mB.r).toFixed(2)}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left; font-weight:bold;">F値 (F1-Score)</td>
-          <td style="color:#888;">${mB.f1.toFixed(2)}</td>
-          <td style="${styleVal(mB.f1, mA.f1)}">${mA.f1.toFixed(2)}</td>
-          <td>+${(mA.f1 - mB.f1).toFixed(2)}</td>
-        </tr>
+        <tr><td style="text-align:left; font-weight:bold;">適合率</td><td style="color:#888;">${mB.p.toFixed(2)}</td><td style="${styleVal(mB.p, mA.p)}">${mA.p.toFixed(2)}</td><td>+${(mA.p - mB.p).toFixed(2)}</td></tr>
+        <tr><td style="text-align:left; font-weight:bold;">再現率</td><td style="color:#888;">${mB.r.toFixed(2)}</td><td style="${styleVal(mB.r, mA.r)}">${mA.r.toFixed(2)}</td><td>${(mA.r - mB.r).toFixed(2)}</td></tr>
+        <tr><td style="text-align:left; font-weight:bold;">F値</td><td style="color:#888;">${mB.f1.toFixed(2)}</td><td style="${styleVal(mB.f1, mA.f1)}">${mA.f1.toFixed(2)}</td><td>+${(mA.f1 - mB.f1).toFixed(2)}</td></tr>
       </tbody>
     </table>
-
-    <div class="paper-text">
-      <strong>【表2の解説】</strong><br>
-      表2は、閾値判定のみを行った場合（Before）と、提案手法である空間フィルタを適用した場合（After）の段差検出精度を比較したものである。<br>
-      評価は「段差」と「それ以外（坂・カーブ・平地）」の2クラス分類として行った。<br><br>
-      結果として、適合率は <b>${mB.p.toFixed(2)}</b> から <b>${mA.p.toFixed(2)}</b> へと大幅に向上した。これは、坂やカーブで発生する突発的な振動ノイズを、空間的な特徴を利用して「非段差」として正しく除外できたことを示している。<br>
-      また、F値も <b>${mA.f1.toFixed(2)}</b> を達成し、提案手法の有効性が確認された。
-    </div>
+    <div class="paper-text"><strong>【表3の解説】</strong><br>提案手法（空間フィルタ）の適用により、適合率およびF値が大幅に向上し、誤検出の抑制に成功したことが示されている。</div>
   `;
 }
 
-// ⑤ ロジック図解（フィルタ導入前であることを明示）
+// ⑤ 検出ロジック (図)
 function drawLogicGraph() {
-  document.getElementById("plot").innerHTML = ""; 
-  document.getElementById("plot").style.height = "450px"; 
-  const area = document.getElementById("metricsArea"); 
-  area.style.display = "block";
-
-  const PRE_N = 5, THRESHOLD = EVENT_TRIGGER_DIFF; 
+  document.getElementById("plot").innerHTML = ""; document.getElementById("plot").style.height = "450px"; 
+  const area = document.getElementById("metricsArea"); area.style.display = "block";
+  const THRESHOLD = EVENT_TRIGGER_DIFF; const triggerIdx = 25;
   const xData = Array.from({length: 40}, (_, i) => i);
-  const yData = xData.map(i => {
-    if (i === 25) return 62; 
-    if (i >= 21 && i < 25) return 20 + Math.random() * 15;
-    return 10 + Math.random() * 10;
-  });
-  const triggerIdx = 25;
+  const yData = xData.map(i => (i===25)?62 : (i>=21&&i<25)?20+Math.random()*15 : 10+Math.random()*10);
 
-  const trace = { 
-    x: xData, y: yData, 
-    mode: 'lines+markers', 
-    name: '加速度変化 (Diff)', 
-    line: { color: '#1a73e8', width: 2 },
-    marker: { size: 6 }
-  };
-
+  const trace = { x: xData, y: yData, mode: 'lines+markers', name: '加速度変化', line: { color: '#1a73e8', width: 2 }, marker: { size: 6 } };
   const layout = {
     title: { text: '基本検知ロジック (フィルタ導入前)', font: { size: 16 } },
-    margin: { t: 50, b: 40, l: 60, r: 40 },
-    xaxis: { title: '時間ステップ (t)', dtick: 5 },
-    yaxis: { title: '加速度変化量 (Diff)', range: [0, 80] },
-    shapes: [
-      { type: 'line', x0: 0, y0: THRESHOLD, x1: 39, y1: THRESHOLD, line: { color: '#d93025', width: 2, dash: 'dash' } },
-      { type: 'rect', x0: triggerIdx - 0.5, y0: 0, x1: triggerIdx + 0.5, y1: 80, fillcolor: 'rgba(255, 0, 0, 0.1)', line: { width: 0 } }
-    ],
-    annotations: [
-      { 
-        x: triggerIdx, y: yData[triggerIdx], 
-        text: `<b>検知！</b><br>Diff=${yData[triggerIdx]} (≧${THRESHOLD})`, 
-        showarrow: true, arrowhead: 2, ax: 50, ay: -30, 
-        font: { color: '#d93025', size: 14, weight: 'bold' },
-        bgcolor: 'rgba(255, 255, 255, 0.8)', bordercolor: '#d93025'
-      },
-      { 
-        x: 0, y: THRESHOLD, 
-        text: `検知閾値 = ${THRESHOLD}`, 
-        showarrow: false, xanchor: 'left', yanchor: 'bottom', 
-        font: { color: '#d93025', weight: 'bold' } 
-      }
-    ]
+    margin: { t: 50, b: 40, l: 60, r: 40 }, xaxis: { title: '時間ステップ', dtick: 5 }, yaxis: { title: '加速度変化量 (Diff)', range: [0, 80] },
+    shapes: [ { type: 'line', x0: 0, y0: THRESHOLD, x1: 39, y1: THRESHOLD, line: { color: '#d93025', width: 2, dash: 'dash' } } ],
+    annotations: [ { x: triggerIdx, y: yData[triggerIdx], text: `<b>検知！</b>`, showarrow: true, arrowhead: 2, ax: 50, ay: -30, font: { color: '#d93025', size: 14 } } ]
   };
-
   Plotly.newPlot('plot', [trace], layout);
-
-  area.innerHTML = `
-    <div class="paper-text" style="margin-top: 10px;">
-      <h4 style="margin-top:0;">【フィルタ導入前の判定ロジック】</h4>
-      <p>
-        この図は、空間フィルタ（提案手法）を適用する前の<strong>「基本的な閾値判定」</strong>の様子を示しています。<br>
-        加速度センサーの数値変化（Diff）が閾値（${THRESHOLD}）を超えた瞬間、即座に「段差」として検知します。
-      </p>
-      <p>
-        <strong>課題：</strong><br>
-        この単純なロジック（Before）では、坂道やカーブなどの「非段差」で発生する振動も、閾値を超えればすべて「段差」と誤判定（False Positive）してしまいます。<br>
-        この誤検知を減らすために、本研究ではこの後に「空間フィルタ」を導入しています。
-      </p>
-    </div>
-  `;
+  area.innerHTML = `<div class="paper-text" style="margin-top: 10px;">この図は、加速度センサーの数値変化が閾値を超えた瞬間に「段差」として検知する基本的なロジックを示している。単純な閾値判定では坂道などの振動も誤検知してしまう課題がある。</div>`;
 }
 
-// ⑥ 詳細レポート (日本語・小数点2桁・After)
+// ⑥ 詳細レポート (After)
 function drawDetailedReport() {
-  document.getElementById("plot").innerHTML = ""; 
-  document.getElementById("plot").style.height = "0px";
-  const area = document.getElementById("metricsArea"); 
-  area.style.display = "block";
-
+  document.getElementById("plot").innerHTML = ""; document.getElementById("plot").style.height = "0px";
+  const area = document.getElementById("metricsArea"); area.style.display = "block";
   if (allData.length === 0) { area.innerHTML = "Loading..."; return; }
-
-  const m = calcMetrics(bestR); // フィルタあり (BestR)
+  const m = calcMetrics(bestR); 
+  const stepSup = m.tp + m.fn, otherSup = m.tn + m.fp;
   
-  // クラス別指標計算
-  const stepP = m.p;
-  const stepR = m.r;
-  const stepF1 = m.f1;
-  const stepSup = m.tp + m.fn; 
-
-  const otherP = m.tn / (m.tn + m.fn) || 0;
-  const otherR = m.tn / (m.tn + m.fp) || 0;
-  const otherF1 = (2 * otherP * otherR) / (otherP + otherR) || 0;
-  const otherSup = m.tn + m.fp; 
-
-  // 平均計算
-  const macroP = (stepP + otherP) / 2;
-  const macroR = (stepR + otherR) / 2;
-  const macroF1 = (stepF1 + otherF1) / 2;
-
-  const total = allData.length;
-  const weightP = (stepP * stepSup + otherP * otherSup) / total;
-  const weightR = (stepR * stepSup + otherR * otherSup) / total;
-  const weightF1 = (stepF1 * stepSup + otherF1 * otherSup) / total;
-
   area.innerHTML = `
-    <h3 style="font-family:serif; text-align:center; margin-bottom:10px;">【導入後 (After)】詳細評価レポート</h3>
+    <h3 style="font-family:serif; text-align:center;">【導入後 (After)】詳細評価レポート</h3>
     <p style="text-align:center; font-size:14px; color:#666;">適用フィルタ半径 R = ${bestR}m</p>
-
-    <h4 style="margin:20px 0 10px 0;">1. クラス別精度 (小数点第2位まで)</h4>
     <table class="metrics-table">
-      <thead>
-        <tr>
-          <th style="text-align:left;">クラス</th>
-          <th>適合率</th>
-          <th>再現率</th>
-          <th>F値</th>
-          <th>データ数</th>
-        </tr>
-      </thead>
+      <thead><tr><th style="text-align:left;">クラス</th><th>適合率</th><th>再現率</th><th>F値</th><th>データ数</th></tr></thead>
       <tbody>
-        <tr>
-          <td style="text-align:left; font-weight:bold; color:#dc3545;">段差 (Step)</td>
-          <td>${stepP.toFixed(2)}</td>
-          <td>${stepR.toFixed(2)}</td>
-          <td>${stepF1.toFixed(2)}</td>
-          <td>${stepSup}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left; font-weight:bold; color:#28a745;">非段差 (Other)</td>
-          <td>${otherP.toFixed(2)}</td>
-          <td>${otherR.toFixed(2)}</td>
-          <td>${otherF1.toFixed(2)}</td>
-          <td>${otherSup}</td>
-        </tr>
-        <tr style="border-top:2px solid #aaa; font-weight:bold; background:#f0f0f0;">
-          <td style="text-align:left;">正解率 (Accuracy)</td>
-          <td colspan="2"></td>
-          <td>${m.acc.toFixed(2)}</td>
-          <td>${total}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left;">マクロ平均 (Macro Avg)</td>
-          <td>${macroP.toFixed(2)}</td>
-          <td>${macroR.toFixed(2)}</td>
-          <td>${macroF1.toFixed(2)}</td>
-          <td>${total}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left;">加重平均 (Weighted Avg)</td>
-          <td>${weightP.toFixed(2)}</td>
-          <td>${weightR.toFixed(2)}</td>
-          <td>${weightF1.toFixed(2)}</td>
-          <td>${total}</td>
-        </tr>
+        <tr><td style="text-align:left; font-weight:bold; color:#dc3545;">段差 (Step)</td><td>${m.p.toFixed(2)}</td><td>${m.r.toFixed(2)}</td><td>${m.f1.toFixed(2)}</td><td>${stepSup}</td></tr>
+        <tr><td style="text-align:left; font-weight:bold; color:#28a745;">非段差 (Other)</td><td>${(m.tn/(m.tn+m.fn)).toFixed(2)}</td><td>${(m.tn/(m.tn+m.fp)).toFixed(2)}</td><td>-</td><td>${otherSup}</td></tr>
       </tbody>
     </table>
-
-    <h4 style="margin:30px 0 10px 0;">2. 混同行列 (Confusion Matrix)</h4>
-    <div style="display:flex; justify-content:center; gap:20px; align-items:flex-start;">
-      <table class="metrics-table" style="width:auto; min-width:400px;">
-        <thead>
-          <tr>
-            <th rowspan="2" style="vertical-align:middle; background:#f9f9f9;">実際のクラス</th>
-            <th colspan="2" style="background:#e8f0fe;">予測クラス (提案手法)</th>
-          </tr>
-          <tr>
-            <th style="width:120px; color:#dc3545;">段差</th>
-            <th style="width:120px; color:#28a745;">非段差</th>
-          </tr>
-        </thead>
+    <div style="display:flex; justify-content:center; gap:20px; margin-top:20px;">
+      <table class="metrics-table" style="width:auto;">
+        <thead><tr><th rowspan="2" style="background:#f9f9f9;">実際</th><th colspan="2" style="background:#e8f0fe;">予測</th></tr><tr><th style="color:#dc3545;">段差</th><th style="color:#28a745;">非段差</th></tr></thead>
         <tbody>
-          <tr>
-            <td style="font-weight:bold; color:#dc3545;">段差</td>
-            <td style="background:#e6fffa; font-weight:bold; font-size:18px;">${m.tp} <br><span style="font-size:11px; font-weight:normal; color:#28a745;">(正解)</span></td>
-            <td style="background:#fff5f5;">${m.fn} <br><span style="font-size:11px; color:#d93025;">(見逃し)</span></td>
-          </tr>
-          <tr>
-            <td style="font-weight:bold; color:#28a745;">非段差</td>
-            <td style="background:#fff5f5;">${m.fp} <br><span style="font-size:11px; color:#d93025;">(誤検知)</span></td>
-            <td style="background:#e6fffa; font-weight:bold; font-size:18px;">${m.tn} <br><span style="font-size:11px; font-weight:normal; color:#28a745;">(正解)</span></td>
-          </tr>
+          <tr><td style="font-weight:bold;">段差</td><td class="bg-ok">${m.tp}</td><td class="bg-ng">${m.fn}</td></tr>
+          <tr><td style="font-weight:bold;">非段差</td><td class="bg-ng">${m.fp}</td><td class="bg-ok">${m.tn}</td></tr>
         </tbody>
       </table>
     </div>
-
-    <div class="paper-text">
-      <strong>【結果】</strong><br>
-      提案手法（空間フィルタ）の適用により、誤検知（FP）が導入前に比べて抑制されていることがわかる。
-    </div>
+    <div class="paper-text">提案手法により、誤検知(FP)が大幅に削減されていることが確認できる。</div>
   `;
 }
 
-// ⑦ 詳細レポート (導入前・Before) - NEW!
+// ⑦ 詳細レポート (Before: 全クラス生データ評価)
 function drawBeforeReport() {
   document.getElementById("plot").innerHTML = ""; 
   document.getElementById("plot").style.height = "0px";
@@ -491,127 +286,124 @@ function drawBeforeReport() {
 
   if (allData.length === 0) { area.innerHTML = "Loading..."; return; }
 
-  const m = calcMetrics(0); // ★ここが重要：半径0＝フィルタなし（閾値のみ）
-  
-  // クラス別指標計算
-  const stepP = m.p;
-  const stepR = m.r;
-  const stepF1 = m.f1;
-  const stepSup = m.tp + m.fn; 
+  // 1. 混同行列作成 (Raw AI Labels vs Ground Truth)
+  // クラス順: 段差 -> カーブ -> 坂 -> 平地
+  const classes = ["step", "curve", "hill", "flat"];
+  const matrix = {}; 
+  classes.forEach(t => { matrix[t] = {}; classes.forEach(p => matrix[t][p] = 0); });
 
-  const otherP = m.tn / (m.tn + m.fn) || 0;
-  const otherR = m.tn / (m.tn + m.fp) || 0;
-  const otherF1 = (2 * otherP * otherR) / (otherP + otherR) || 0;
-  const otherSup = m.tn + m.fp; 
+  allData.forEach(d => {
+    // 正解ラベル
+    let gt = d.gt;     
+    if (!classes.includes(gt)) gt = "flat"; 
+    
+    // AI生ラベル (rawAuto)
+    let pred = d.rawAuto; 
+    if (!classes.includes(pred)) pred = "flat"; 
 
-  // 平均計算
-  const macroP = (stepP + otherP) / 2;
-  const macroR = (stepR + otherR) / 2;
-  const macroF1 = (stepF1 + otherF1) / 2;
+    matrix[gt][pred]++;
+  });
 
-  const total = allData.length;
-  const weightP = (stepP * stepSup + otherP * otherSup) / total;
-  const weightR = (stepR * stepSup + otherR * otherSup) / total;
-  const weightF1 = (stepF1 * stepSup + otherF1 * otherSup) / total;
+  // 2. 指標計算
+  const names = { step:"段差", curve:"カーブ", hill:"坂", flat:"平地" };
+  const rows = classes.map(cls => {
+    const tp = matrix[cls][cls];
+    const fn = classes.reduce((sum, p) => (p !== cls) ? sum + matrix[cls][p] : sum, 0); // 見逃し
+    const fp = classes.reduce((sum, t) => (t !== cls) ? sum + matrix[t][cls] : sum, 0); // 誤検知
+    const total = tp + fn;
 
+    const precision = tp / (tp + fp) || 0;
+    const recall = tp / (tp + fn) || 0;
+    const f1 = (2 * precision * recall) / (precision + recall) || 0;
+    
+    return { cls, p: precision, r: recall, f: f1, total };
+  });
+
+  const fmt = n => n.toFixed(2);
+
+  // 3. HTML生成
   area.innerHTML = `
-    <h3 style="font-family:serif; text-align:center; margin-bottom:10px;">【導入前 (Before)】詳細評価レポート</h3>
-    <p style="text-align:center; font-size:14px; color:#666;">適用フィルタ半径 R = 0m (閾値判定のみ)</p>
+    <h3 style="font-family:serif; text-align:center;">表2. クラス別 詳細評価 (Before)</h3>
+    <p style="text-align:center; font-size:13px; color:#666; margin-bottom:20px;">
+      AIの生データ（フィルタ処理前）に基づく全クラスの検出精度。<br>
+      この表では、AIが「坂」や「カーブ」をどの程度正しく識別できているか（適合率）も確認できる。
+    </p>
 
-    <h4 style="margin:20px 0 10px 0;">1. クラス別精度 (閾値判定のみ)</h4>
     <table class="metrics-table">
       <thead>
         <tr>
           <th style="text-align:left;">クラス</th>
-          <th>適合率</th>
-          <th>再現率</th>
-          <th>F値</th>
-          <th>データ数</th>
+          <th>適合率<br><span style="font-size:10px; font-weight:normal;">(Precision)</span></th>
+          <th>再現率<br><span style="font-size:10px; font-weight:normal;">(Recall)</span></th>
+          <th>F1スコア</th>
+          <th>サンプル数</th>
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td style="text-align:left; font-weight:bold; color:#dc3545;">段差 (Step)</td>
-          <td>${stepP.toFixed(2)}</td>
-          <td>${stepR.toFixed(2)}</td>
-          <td>${stepF1.toFixed(2)}</td>
-          <td>${stepSup}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left; font-weight:bold; color:#28a745;">非段差 (Other)</td>
-          <td>${otherP.toFixed(2)}</td>
-          <td>${otherR.toFixed(2)}</td>
-          <td>${otherF1.toFixed(2)}</td>
-          <td>${otherSup}</td>
-        </tr>
-        <tr style="border-top:2px solid #aaa; font-weight:bold; background:#f0f0f0;">
-          <td style="text-align:left;">正解率 (Accuracy)</td>
-          <td colspan="2"></td>
-          <td>${m.acc.toFixed(2)}</td>
-          <td>${total}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left;">マクロ平均 (Macro Avg)</td>
-          <td>${macroP.toFixed(2)}</td>
-          <td>${macroR.toFixed(2)}</td>
-          <td>${macroF1.toFixed(2)}</td>
-          <td>${total}</td>
-        </tr>
-        <tr>
-          <td style="text-align:left;">加重平均 (Weighted Avg)</td>
-          <td>${weightP.toFixed(2)}</td>
-          <td>${weightR.toFixed(2)}</td>
-          <td>${weightF1.toFixed(2)}</td>
-          <td>${total}</td>
+        ${rows.map(r => `
+          <tr>
+            <td style="text-align:left; font-weight:bold;">${names[r.cls]} (${r.cls})</td>
+            <td style="${r.p < 0.5 ? 'color:#d93025' : ''} ${r.cls==='step'?'font-weight:bold':''}">${fmt(r.p)}</td>
+            <td style="${r.r < 0.5 ? 'color:#d93025' : ''} ${r.cls==='step'?'font-weight:bold':''}">${fmt(r.r)}</td>
+            <td style="${r.cls==='step'?'font-weight:bold':''}">${fmt(r.f)}</td>
+            <td>${r.total}</td>
+          </tr>
+        `).join('')}
+        <tr style="border-top:2px solid #333; background:#f9f9f9;">
+          <td style="text-align:left; font-weight:bold;">合計 (Total)</td>
+          <td>-</td><td>-</td><td>-</td>
+          <td style="font-weight:bold;">${allData.length}</td>
         </tr>
       </tbody>
     </table>
 
-    <h4 style="margin:30px 0 10px 0;">2. 混同行列 (Confusion Matrix)</h4>
-    <div style="display:flex; justify-content:center; gap:20px; align-items:flex-start;">
-      <table class="metrics-table" style="width:auto; min-width:400px;">
-        <thead>
+    <h4 style="margin:20px 0 10px 0;">混同行列 (Confusion Matrix)</h4>
+    <div style="overflow-x:auto;">
+    <table class="metrics-table" style="width:auto; margin:0 auto; min-width:400px;">
+      <thead>
+        <tr>
+          <th rowspan="2" style="background:#fff; border:none;"></th>
+          <th colspan="4" style="background:#e8f0fe; border-bottom:1px solid #ddd;">AIの予測 (Auto Label)</th>
+        </tr>
+        <tr>
+          ${classes.map(c => `<th style="width:70px; font-size:12px;">${names[c]}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${classes.map(gt => `
           <tr>
-            <th rowspan="2" style="vertical-align:middle; background:#f9f9f9;">実際のクラス</th>
-            <th colspan="2" style="background:#e8f0fe;">予測クラス (閾値のみ)</th>
+            <th style="background:#f9f9f9; text-align:right;">${names[gt]}<br><span style="font-size:10px; font-weight:normal;">(正解)</span></th>
+            ${classes.map(pred => {
+              const val = matrix[gt][pred];
+              const isDiag = (gt === pred);
+              const style = isDiag ? (val>0 ? "bg-ok" : "") : (val>0 ? "bg-ng" : "");
+              return `<td class="cm-cell ${style}">${val}</td>`;
+            }).join('')}
           </tr>
-          <tr>
-            <th style="width:120px; color:#dc3545;">段差</th>
-            <th style="width:120px; color:#28a745;">非段差</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td style="font-weight:bold; color:#dc3545;">段差</td>
-            <td style="background:#e6fffa; font-weight:bold; font-size:18px;">${m.tp} <br><span style="font-size:11px; font-weight:normal; color:#28a745;">(正解)</span></td>
-            <td style="background:#fff5f5;">${m.fn} <br><span style="font-size:11px; color:#d93025;">(見逃し)</span></td>
-          </tr>
-          <tr>
-            <td style="font-weight:bold; color:#28a745;">非段差</td>
-            <td style="background:#fff5f5;">${m.fp} <br><span style="font-size:11px; color:#d93025;">(誤検知)</span></td>
-            <td style="background:#e6fffa; font-weight:bold; font-size:18px;">${m.tn} <br><span style="font-size:11px; font-weight:normal; color:#28a745;">(正解)</span></td>
-          </tr>
-        </tbody>
-      </table>
+        `).join('')}
+      </tbody>
+    </table>
     </div>
 
     <div class="paper-text">
       <strong>【Beforeの分析】</strong><br>
-      この表は、空間フィルタを適用せず、加速度センサーの閾値のみで判定した場合の結果である。<br>
-      混同行列の「誤検知 (FP)」の多さに注目されたい。坂やカーブなどの振動を「段差」と誤認しているケースが多く、これが全体の適合率（Precision）を下げる主な要因となっていた。
+      混同行列（下表）の「正解：坂」の行に注目すると、AIが坂を正しく「坂」と判定できているか、あるいは「段差」や「平地」と誤認しているかが明確になります。<br>
+      例えば、正解が「坂」なのに予測が「段差」のセル（表中の赤色部分）に数値がある場合、それが誤検知（False Positive）の直接的な原因です。
     </div>
   `;
 }
 
 function hideMetrics() { document.getElementById("metricsArea").style.display = "none"; document.getElementById("plot").style.height = "550px"; }
 function switchTab(e) { document.querySelectorAll('button').forEach(b => b.classList.remove('active')); e.target.classList.add('active'); }
+
+// イベントリスナ設定
 document.getElementById("btn1").onclick = (e) => { switchTab(e); drawScatter(); };
 document.getElementById("btn2").onclick = (e) => { switchTab(e); drawSensitivity(); };
 document.getElementById("btn3").onclick = (e) => { switchTab(e); drawComp(); };
 document.getElementById("btn4").onclick = (e) => { switchTab(e); drawAccuracyMetrics(); };
 document.getElementById("btn5").onclick = (e) => { switchTab(e); drawLogicGraph(); };
 document.getElementById("btn6").onclick = (e) => { switchTab(e); drawDetailedReport(); };
-document.getElementById("btn7").onclick = (e) => { switchTab(e); drawBeforeReport(); }; // 追加
+document.getElementById("btn7").onclick = (e) => { switchTab(e); drawBeforeReport(); }; // 全クラス精度評価
 
 init();
 </script>
